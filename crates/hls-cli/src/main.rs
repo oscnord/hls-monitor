@@ -547,6 +547,7 @@ async fn run_watch(
             }
         }
 
+        status_lines.push(String::new());
         status_bar.set_message(status_lines.join("\n"));
     }
 }
