@@ -3,12 +3,19 @@ use crate::monitor::state::{CheckContext, PlaylistSnapshot, VariantState};
 
 use super::Check;
 
-/// Detects media sequence regressions (current mseq < previous mseq).
-pub struct MediaSequenceCheck;
+pub struct MseqGapCheck {
+    threshold: u64,
+}
 
-impl Check for MediaSequenceCheck {
+impl MseqGapCheck {
+    pub fn new(threshold: u64) -> Self {
+        Self { threshold }
+    }
+}
+
+impl Check for MseqGapCheck {
     fn name(&self) -> &'static str {
-        "MediaSequence"
+        "MseqGap"
     }
 
     fn check(
@@ -17,14 +24,21 @@ impl Check for MediaSequenceCheck {
         curr: &PlaylistSnapshot,
         ctx: &CheckContext,
     ) -> Vec<MonitorError> {
-        if curr.media_sequence < prev.media_sequence {
+        if curr.media_sequence <= prev.media_sequence {
+            return vec![];
+        }
+
+        let diff = curr.media_sequence - prev.media_sequence;
+        let window = prev.segment_uris.len() as u64;
+
+        if diff > window && diff >= self.threshold {
             vec![MonitorError::new(
-                ErrorType::MediaSequence,
+                ErrorType::MediaSequenceGap,
                 &ctx.media_type,
                 &ctx.variant_key,
                 format!(
-                    "Expected mediaSequence >= {}. Got: {}",
-                    prev.media_sequence, curr.media_sequence
+                    "Media sequence jumped forward by {} (from {} to {}), exceeding playlist window of {} segments",
+                    diff, prev.media_sequence, curr.media_sequence, window
                 ),
                 &ctx.stream_url,
                 &ctx.stream_id,
@@ -49,15 +63,18 @@ mod tests {
         }
     }
 
-    fn make_prev(mseq: u64) -> VariantState {
+    fn make_prev(mseq: u64, segment_count: usize) -> VariantState {
+        let segment_uris: Vec<String> = (0..segment_count)
+            .map(|i| format!("seg{}.ts", i))
+            .collect();
         VariantState {
             media_type: "VIDEO".to_string(),
             media_sequence: mseq,
-            segment_uris: vec!["a.ts".into(), "b.ts".into()],
+            segment_uris,
             discontinuity_sequence: 0,
             next_is_discontinuity: false,
             prev_segments: vec![],
-            duration: 20.0,
+            duration: 10.0 * segment_count as f64,
             cue_out_count: 0,
             cue_in_count: 0,
             in_cue_out: false,
@@ -72,18 +89,7 @@ mod tests {
             discontinuity_sequence: 0,
             segments: vec![
                 SegmentSnapshot {
-                    uri: "b.ts".into(),
-                    duration: 10.0,
-                    discontinuity: false,
-                    cue_out: false,
-                    cue_in: false,
-                    cue_out_cont: None,
-                    gap: false,
-                    program_date_time: None,
-                    daterange: None,
-                },
-                SegmentSnapshot {
-                    uri: "c.ts".into(),
+                    uri: "a.ts".into(),
                     duration: 10.0,
                     discontinuity: false,
                     cue_out: false,
@@ -94,7 +100,7 @@ mod tests {
                     daterange: None,
                 },
             ],
-            duration: 20.0,
+            duration: 10.0,
             cue_out_count: 0,
             cue_in_count: 0,
             has_cue_out: false,
@@ -107,27 +113,41 @@ mod tests {
     }
 
     #[test]
-    fn detects_regression() {
-        let check = MediaSequenceCheck;
-        let errors = check.check(&make_prev(5), &make_snap(3), &ctx());
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].error_type, ErrorType::MediaSequence);
-        assert!(errors[0]
-            .details
-            .contains("Expected mediaSequence >= 5. Got: 3"));
-    }
-
-    #[test]
-    fn no_error_on_equal_mseq() {
-        let check = MediaSequenceCheck;
-        let errors = check.check(&make_prev(5), &make_snap(5), &ctx());
+    fn no_error_on_normal_advance() {
+        let check = MseqGapCheck::new(5);
+        let errors = check.check(&make_prev(10, 5), &make_snap(11), &ctx());
         assert!(errors.is_empty());
     }
 
     #[test]
-    fn no_error_on_forward_mseq() {
-        let check = MediaSequenceCheck;
-        let errors = check.check(&make_prev(5), &make_snap(7), &ctx());
+    fn no_error_within_window() {
+        let check = MseqGapCheck::new(5);
+        let errors = check.check(&make_prev(10, 5), &make_snap(15), &ctx());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn no_error_on_regression() {
+        let check = MseqGapCheck::new(5);
+        let errors = check.check(&make_prev(10, 5), &make_snap(8), &ctx());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn error_on_large_jump() {
+        let check = MseqGapCheck::new(5);
+        let errors = check.check(&make_prev(10, 5), &make_snap(60), &ctx());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, ErrorType::MediaSequenceGap);
+        assert!(errors[0].details.contains("jumped forward by 50"));
+        assert!(errors[0].details.contains("from 10 to 60"));
+        assert!(errors[0].details.contains("window of 5 segments"));
+    }
+
+    #[test]
+    fn no_error_below_threshold() {
+        let check = MseqGapCheck::new(50);
+        let errors = check.check(&make_prev(10, 5), &make_snap(30), &ctx());
         assert!(errors.is_empty());
     }
 }

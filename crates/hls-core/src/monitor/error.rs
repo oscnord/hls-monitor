@@ -16,6 +16,16 @@ pub enum ErrorType {
     DiscontinuitySequence,
     StaleManifest,
     Scte35Violation,
+    TargetDurationExceeded,
+    GapDetected,
+    MediaSequenceGap,
+    VariantSyncDrift,
+    VariantUnavailable,
+    PlaylistTypeViolation,
+    ProgramDateTimeJump,
+    SegmentDurationAnomaly,
+    VersionViolation,
+    DateRangeViolation,
 }
 
 impl fmt::Display for ErrorType {
@@ -29,6 +39,16 @@ impl fmt::Display for ErrorType {
             Self::DiscontinuitySequence => write!(f, "Discontinuity Sequence"),
             Self::StaleManifest => write!(f, "Stale Manifest"),
             Self::Scte35Violation => write!(f, "SCTE-35 Violation"),
+            Self::TargetDurationExceeded => write!(f, "Target Duration Exceeded"),
+            Self::GapDetected => write!(f, "Gap Detected"),
+            Self::MediaSequenceGap => write!(f, "Media Sequence Gap"),
+            Self::VariantSyncDrift => write!(f, "Variant Sync Drift"),
+            Self::VariantUnavailable => write!(f, "Variant Unavailable"),
+            Self::PlaylistTypeViolation => write!(f, "Playlist Type Violation"),
+            Self::ProgramDateTimeJump => write!(f, "Program Date-Time Jump"),
+            Self::SegmentDurationAnomaly => write!(f, "Segment Duration Anomaly"),
+            Self::VersionViolation => write!(f, "Version Violation"),
+            Self::DateRangeViolation => write!(f, "Date Range Violation"),
         }
     }
 }

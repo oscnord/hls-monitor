@@ -23,20 +23,23 @@ impl Check for Scte35Check {
         let has_cue_in = curr.segments.iter().any(|s| s.cue_in);
         let has_cue_out_cont = curr.segments.iter().any(|s| s.cue_out_cont.is_some());
 
-        if prev.in_cue_out && !has_cue_out && !has_cue_in && !has_cue_out_cont {
-            if curr.media_sequence > prev.media_sequence {
-                errors.push(MonitorError::new(
-                    ErrorType::Scte35Violation,
-                    &ctx.media_type,
-                    &ctx.variant_key,
-                    format!(
-                        "CUE-OUT markers disappeared without CUE-IN in mseq({})",
-                        curr.media_sequence
-                    ),
-                    &ctx.stream_url,
-                    &ctx.stream_id,
-                ));
-            }
+        if prev.in_cue_out
+            && !has_cue_out
+            && !has_cue_in
+            && !has_cue_out_cont
+            && curr.media_sequence > prev.media_sequence
+        {
+            errors.push(MonitorError::new(
+                ErrorType::Scte35Violation,
+                &ctx.media_type,
+                &ctx.variant_key,
+                format!(
+                    "CUE-OUT markers disappeared without CUE-IN in mseq({})",
+                    curr.media_sequence
+                ),
+                &ctx.stream_url,
+                &ctx.stream_id,
+            ));
         }
 
         if has_cue_in && !prev.in_cue_out && !has_cue_out {
@@ -93,6 +96,9 @@ mod tests {
             cue_out,
             cue_in,
             cue_out_cont: cont.map(|s| s.to_string()),
+            gap: false,
+            program_date_time: None,
+            daterange: None,
         }
     }
 
@@ -109,6 +115,7 @@ mod tests {
             cue_in_count: 0,
             in_cue_out,
             cue_out_duration: None,
+            version: None,
         }
     }
 
@@ -125,6 +132,10 @@ mod tests {
             cue_in_count,
             has_cue_out,
             cue_out_duration: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            version: None,
+            has_gaps: false,
         }
     }
 

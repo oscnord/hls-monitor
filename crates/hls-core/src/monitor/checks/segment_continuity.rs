@@ -83,6 +83,9 @@ mod tests {
             cue_out: false,
             cue_in: false,
             cue_out_cont: None,
+            gap: false,
+            program_date_time: None,
+            daterange: None,
         }
     }
 
@@ -99,6 +102,7 @@ mod tests {
             cue_in_count: 0,
             in_cue_out: false,
             cue_out_duration: None,
+            version: None,
         }
     }
 
@@ -112,6 +116,10 @@ mod tests {
             cue_in_count: 0,
             has_cue_out: false,
             cue_out_duration: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            version: None,
+            has_gaps: false,
         }
     }
 

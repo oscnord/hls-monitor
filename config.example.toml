@@ -11,6 +11,11 @@
 # scte35 = false                    # enable SCTE-35 / CUE marker validation
 # error_limit = 100                 # max errors kept per monitor
 # event_limit = 200                 # max events kept per monitor
+# target_duration_tolerance = 0.5   # seconds over EXT-X-TARGETDURATION before error
+# mseq_gap_threshold = 5            # max allowed media-sequence jump between polls
+# variant_sync_drift_threshold = 3  # max media-sequence drift between variants
+# variant_failure_threshold = 3     # consecutive failures before variant is flagged
+# segment_duration_anomaly_ratio = 0.5  # fraction deviation from target duration
 
 [[webhook]]
 url = "https://hooks.example.com/hls-alerts"
