@@ -101,7 +101,7 @@ impl ManifestLoader for HttpLoader {
                             is_last_retry: is_last,
                         };
 
-                        if status >= 400 && status < 500 && status != 429 {
+                        if (400..500).contains(&status) && status != 429 {
                             return Err(err);
                         }
                         last_error = Some(err);

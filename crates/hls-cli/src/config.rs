@@ -89,6 +89,21 @@ pub struct DefaultsConfig {
 
     #[serde(default = "default_event_limit")]
     pub event_limit: usize,
+
+    #[serde(default)]
+    pub target_duration_tolerance: Option<f64>,
+
+    #[serde(default)]
+    pub mseq_gap_threshold: Option<u64>,
+
+    #[serde(default)]
+    pub variant_sync_drift_threshold: Option<u64>,
+
+    #[serde(default)]
+    pub variant_failure_threshold: Option<u32>,
+
+    #[serde(default)]
+    pub segment_duration_anomaly_ratio: Option<f64>,
 }
 
 impl Default for DefaultsConfig {
@@ -99,6 +114,11 @@ impl Default for DefaultsConfig {
             scte35: false,
             error_limit: default_error_limit(),
             event_limit: default_event_limit(),
+            target_duration_tolerance: None,
+            mseq_gap_threshold: None,
+            variant_sync_drift_threshold: None,
+            variant_failure_threshold: None,
+            segment_duration_anomaly_ratio: None,
         }
     }
 }
@@ -125,6 +145,21 @@ impl DefaultsConfig {
         if let Some(pi) = self.poll_interval_ms {
             c = c.with_poll_interval(pi);
         }
+        if let Some(v) = self.target_duration_tolerance {
+            c = c.with_target_duration_tolerance(v);
+        }
+        if let Some(v) = self.mseq_gap_threshold {
+            c = c.with_mseq_gap_threshold(v);
+        }
+        if let Some(v) = self.variant_sync_drift_threshold {
+            c = c.with_variant_sync_drift_threshold(v);
+        }
+        if let Some(v) = self.variant_failure_threshold {
+            c = c.with_variant_failure_threshold(v);
+        }
+        if let Some(v) = self.segment_duration_anomaly_ratio {
+            c = c.with_segment_duration_anomaly_ratio(v);
+        }
         c
     }
 }
@@ -135,6 +170,11 @@ pub struct MonitorDef {
     pub stale_limit_ms: Option<u64>,
     pub poll_interval_ms: Option<u64>,
     pub scte35: Option<bool>,
+    pub target_duration_tolerance: Option<f64>,
+    pub mseq_gap_threshold: Option<u64>,
+    pub variant_sync_drift_threshold: Option<u64>,
+    pub variant_failure_threshold: Option<u32>,
+    pub segment_duration_anomaly_ratio: Option<f64>,
 
     #[serde(default)]
     pub streams: Vec<StreamDef>,
@@ -157,6 +197,21 @@ impl MonitorDef {
         }
         if let Some(scte) = self.scte35 {
             c = c.with_scte35(scte);
+        }
+        if let Some(v) = self.target_duration_tolerance {
+            c = c.with_target_duration_tolerance(v);
+        }
+        if let Some(v) = self.mseq_gap_threshold {
+            c = c.with_mseq_gap_threshold(v);
+        }
+        if let Some(v) = self.variant_sync_drift_threshold {
+            c = c.with_variant_sync_drift_threshold(v);
+        }
+        if let Some(v) = self.variant_failure_threshold {
+            c = c.with_variant_failure_threshold(v);
+        }
+        if let Some(v) = self.segment_duration_anomaly_ratio {
+            c = c.with_segment_duration_anomaly_ratio(v);
         }
         c
     }

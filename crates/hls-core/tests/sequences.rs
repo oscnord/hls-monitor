@@ -46,6 +46,38 @@ fn s_ci(uri: &'static str) -> Seg {
     Seg { uri, disc: false, cue_out: None, cue_in: true }
 }
 
+struct FlexSeg {
+    uri: &'static str,
+    dur: f64,
+    disc: bool,
+    gap: bool,
+}
+
+fn fs(uri: &'static str, dur: f64) -> FlexSeg {
+    FlexSeg { uri, dur, disc: false, gap: false }
+}
+
+fn fs_gap(uri: &'static str, dur: f64) -> FlexSeg {
+    FlexSeg { uri, dur, disc: false, gap: true }
+}
+
+fn mp_flex(mseq: u64, target_dur: u64, segs: &[FlexSeg]) -> String {
+    let mut out = format!(
+        "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:{}\n",
+        target_dur, mseq
+    );
+    for seg in segs {
+        if seg.disc {
+            out.push_str("#EXT-X-DISCONTINUITY\n");
+        }
+        if seg.gap {
+            out.push_str("#EXT-X-GAP\n");
+        }
+        writeln!(out, "#EXTINF:{:.3},\n{}", seg.dur, seg.uri).unwrap();
+    }
+    out
+}
+
 fn mp(mseq: u64, dseq: Option<u64>, segs: &[Seg]) -> String {
     let mut out = format!(
         "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:{}\n",
@@ -105,6 +137,40 @@ async fn run_sequence(
     });
 
     let config = MonitorConfig::default().with_stale_limit(8000);
+    let stream = StreamItem {
+        id: "stream_1".to_string(),
+        url: MASTER_URL.to_string(),
+    };
+
+    let monitor = Monitor::new(vec![stream], config, loader, None);
+
+    for poll in 0..num_polls {
+        step.store(poll, Ordering::SeqCst);
+        monitor.poll_once().await;
+    }
+
+    monitor.get_errors().await
+}
+
+#[allow(dead_code)]
+async fn run_sequence_with_config(
+    level0_steps: Vec<String>,
+    level1_steps: Vec<String>,
+    num_polls: usize,
+    config: MonitorConfig,
+) -> Vec<hls_core::MonitorError> {
+    let step = Arc::new(AtomicUsize::new(0));
+
+    let mut responses = HashMap::new();
+    responses.insert(MASTER_URL.to_string(), vec![MASTER_PLAYLIST.to_string()]);
+    responses.insert(LEVEL0_URL.to_string(), level0_steps);
+    responses.insert(LEVEL1_URL.to_string(), level1_steps);
+
+    let loader = Arc::new(SequenceLoader {
+        step: Arc::clone(&step),
+        responses,
+    });
+
     let stream = StreamItem {
         id: "stream_1".to_string(),
         url: MASTER_URL.to_string(),
@@ -698,4 +764,55 @@ async fn test_stream_status() {
         assert_eq!(v.segment_count, 3);
         assert!(!v.in_cue_out);
     }
+}
+
+#[tokio::test]
+async fn test_target_duration_exceeded() {
+    let playlist = mp_flex(100, 6, &[fs("a.ts", 6.0), fs("b.ts", 7.5)]);
+    let errors = run_sequence(vec![playlist.clone()], vec![playlist], 2).await;
+    let td_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.error_type == ErrorType::TargetDurationExceeded)
+        .collect();
+    assert!(
+        !td_errors.is_empty(),
+        "Expected TargetDurationExceeded errors, got: {:#?}",
+        errors.iter().map(|e| (&e.error_type, &e.details)).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_gap_detected() {
+    let playlist = mp_flex(100, 10, &[fs("a.ts", 10.0), fs_gap("b.ts", 10.0)]);
+    let errors = run_sequence(vec![playlist.clone()], vec![playlist], 2).await;
+    let gap_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.error_type == ErrorType::GapDetected)
+        .collect();
+    assert!(
+        !gap_errors.is_empty(),
+        "Expected GapDetected errors, got: {:#?}",
+        errors.iter().map(|e| (&e.error_type, &e.details)).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_media_sequence_gap() {
+    let step1 = mp(100, None, &[s("a.ts"), s("b.ts"), s("c.ts")]);
+    let step2 = mp(200, None, &[s("x.ts"), s("y.ts"), s("z.ts")]);
+    let errors = run_sequence(
+        vec![step1.clone(), step2.clone()],
+        vec![step1, step2],
+        2,
+    )
+    .await;
+    let gap_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.error_type == ErrorType::MediaSequenceGap)
+        .collect();
+    assert!(
+        !gap_errors.is_empty(),
+        "Expected MediaSequenceGap errors, got: {:#?}",
+        errors.iter().map(|e| (&e.error_type, &e.details)).collect::<Vec<_>>()
+    );
 }
