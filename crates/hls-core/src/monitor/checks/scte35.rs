@@ -93,6 +93,9 @@ mod tests {
             cue_out,
             cue_in,
             cue_out_cont: cont.map(|s| s.to_string()),
+            gap: false,
+            program_date_time: None,
+            daterange: None,
         }
     }
 
@@ -109,6 +112,7 @@ mod tests {
             cue_in_count: 0,
             in_cue_out,
             cue_out_duration: None,
+            version: None,
         }
     }
 
@@ -125,6 +129,10 @@ mod tests {
             cue_in_count,
             has_cue_out,
             cue_out_duration: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            version: None,
+            has_gaps: false,
         }
     }
 

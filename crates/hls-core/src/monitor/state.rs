@@ -51,6 +51,7 @@ pub struct VariantState {
     pub cue_in_count: usize,
     pub in_cue_out: bool,
     pub cue_out_duration: Option<f64>,
+    pub version: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,10 @@ pub struct PlaylistSnapshot {
     pub cue_in_count: usize,
     pub has_cue_out: bool,
     pub cue_out_duration: Option<f64>,
+    pub target_duration: f64,
+    pub playlist_type: Option<String>,
+    pub version: Option<u16>,
+    pub has_gaps: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +84,19 @@ pub struct SegmentSnapshot {
     pub cue_out: bool,
     pub cue_in: bool,
     pub cue_out_cont: Option<String>,
+    pub gap: bool,
+    pub program_date_time: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub daterange: Option<DateRangeSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DateRangeSnapshot {
+    pub id: String,
+    pub class: Option<String>,
+    pub start_date: chrono::DateTime<chrono::FixedOffset>,
+    pub end_date: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pub duration: Option<f64>,
+    pub end_on_next: bool,
 }
 
 #[derive(Debug, Clone)]

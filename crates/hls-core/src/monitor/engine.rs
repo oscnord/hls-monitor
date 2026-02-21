@@ -379,6 +379,15 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
             None
         }
     });
+    let gap = seg.unknown_tags.iter().any(|t| t.tag == "X-GAP");
+    let daterange = seg.daterange.as_ref().map(|dr| DateRangeSnapshot {
+        id: dr.id.clone(),
+        class: dr.class.clone(),
+        start_date: dr.start_date,
+        end_date: dr.end_date,
+        duration: dr.duration,
+        end_on_next: dr.end_on_next,
+    });
 
     SegmentSnapshot {
         uri: seg.uri.clone(),
@@ -387,6 +396,9 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
         cue_out,
         cue_in,
         cue_out_cont,
+        gap,
+        program_date_time: seg.program_date_time,
+        daterange,
     }
 }
 
@@ -403,6 +415,7 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
     let cue_out_count = segments.iter().filter(|s| s.cue_out).count();
     let cue_in_count = segments.iter().filter(|s| s.cue_in).count();
     let has_cue_out = cue_out_count > 0;
+    let has_gaps = segments.iter().any(|s| s.gap);
 
     PlaylistSnapshot {
         media_sequence: pl.media_sequence,
@@ -413,6 +426,10 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
         cue_in_count,
         has_cue_out,
         cue_out_duration: None,
+        target_duration: pl.target_duration as f64,
+        version: pl.version.and_then(|v| u16::try_from(v).ok()),
+        playlist_type: pl.playlist_type.as_ref().map(|pt| pt.to_string()),
+        has_gaps,
     }
 }
 
@@ -624,6 +641,7 @@ async fn poll_stream(
                     cue_in_count: snapshot.cue_in_count,
                     in_cue_out: new_in_cue_out,
                     cue_out_duration: snapshot.cue_out_duration,
+                    version: snapshot.version,
                 };
                 sd.variants.insert(variant_key_str.clone(), new_state);
 
@@ -724,6 +742,7 @@ async fn poll_stream(
                     cue_in_count: snapshot.cue_in_count,
                     in_cue_out: has_cue_out && !has_cue_in,
                     cue_out_duration: snapshot.cue_out_duration,
+                    version: snapshot.version,
                 };
                 sd.variants.insert(variant_key_str.clone(), initial_state);
             }
