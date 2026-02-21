@@ -125,17 +125,16 @@ enum Commands {
         #[arg(long, default_value_t = 6000)]
         stale_limit: u64,
 
-        /// Poll interval in milliseconds.
+        /// Poll interval in milliseconds [default: stale_limit / 2].
         #[arg(long)]
         poll_interval: Option<u64>,
-
-        /// Enable SCTE-35/CUE marker validation.
-        #[arg(long, default_value_t = false)]
-        scte35: bool,
 
         /// Optional webhook URL to POST notifications to.
         #[arg(long)]
         webhook_url: Option<String>,
+
+        #[command(flatten)]
+        checks: CheckArgs,
     },
 }
 
@@ -159,15 +158,15 @@ async fn main() {
             url,
             stale_limit,
             poll_interval,
-            scte35,
             webhook_url,
+            checks,
         } => {
             fmt()
                 .with_env_filter(
                     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
                 )
                 .init();
-            run_watch(url, stale_limit, poll_interval, scte35, webhook_url).await;
+            run_watch(url, stale_limit, poll_interval, webhook_url, checks).await;
         }
     }
 }
@@ -337,13 +336,11 @@ async fn run_watch(
     url: String,
     stale_limit: u64,
     poll_interval: Option<u64>,
-    scte35: bool,
     webhook_url: Option<String>,
+    checks: CheckArgs,
 ) {
     let config = {
-        let mut c = MonitorConfig::default()
-            .with_stale_limit(stale_limit)
-            .with_scte35(scte35);
+        let mut c = checks.to_monitor_config().with_stale_limit(stale_limit);
         if let Some(pi) = poll_interval {
             c = c.with_poll_interval(pi);
         }
@@ -369,6 +366,7 @@ async fn run_watch(
         None
     };
 
+    let scte35_enabled = config.scte35_enabled;
     let loader = Arc::new(HttpLoader::from_config(&config));
     let stream = StreamItem {
         id: "stream_1".to_string(),
@@ -401,7 +399,7 @@ async fn run_watch(
         .println(format!("  {} {}ms", style("stale: ").dim(), stale_limit))
         .ok();
     multi
-        .println(format!("  {} {}", style("scte35:").dim(), scte35))
+        .println(format!("  {} {}", style("scte35:").dim(), scte35_enabled))
         .ok();
     if let Some(ref wh) = webhook_url {
         multi
