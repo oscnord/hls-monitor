@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use m3u8_rs::Playlist;
 use rand::Rng;
 use tokio::sync::mpsc::UnboundedSender;
@@ -12,7 +13,8 @@ use uuid::Uuid;
 use crate::config::MonitorConfig;
 use crate::loader::ManifestLoader;
 use crate::monitor::checks::stale_manifest::check_stale;
-use crate::monitor::checks::{default_checks, Check};
+use crate::monitor::checks::stream_check;
+use crate::monitor::checks::{default_checks, default_stream_checks, Check};
 use crate::monitor::error::{ErrorType, MonitorError};
 use crate::monitor::event::{EventKind, MonitorEvent};
 use crate::monitor::state::*;
@@ -27,6 +29,7 @@ pub struct Monitor {
     state: Arc<RwLock<MonitorState>>,
     loader: Arc<dyn ManifestLoader>,
     checks: Arc<Vec<Box<dyn Check>>>,
+    stream_checks: Arc<Vec<Box<dyn stream_check::StreamCheck>>>,
     created_at: chrono::DateTime<Utc>,
     last_checked: Arc<RwLock<Option<chrono::DateTime<Utc>>>>,
     total_errors_per_stream: Arc<RwLock<HashMap<String, u64>>>,
@@ -42,7 +45,8 @@ impl Monitor {
         loader: Arc<dyn ManifestLoader>,
         notification_tx: Option<UnboundedSender<Notification>>,
     ) -> Self {
-        let checks = default_checks(config.scte35_enabled);
+        let checks = default_checks(&config);
+        let stream_checks = default_stream_checks(&config);
         let id = Uuid::new_v4();
         Self {
             monitor_id: id.to_string(),
@@ -53,6 +57,7 @@ impl Monitor {
             state: Arc::new(RwLock::new(MonitorState::Idle)),
             loader,
             checks: Arc::new(checks),
+            stream_checks: Arc::new(stream_checks),
             created_at: Utc::now(),
             last_checked: Arc::new(RwLock::new(None)),
             total_errors_per_stream: Arc::new(RwLock::new(HashMap::new())),
@@ -133,7 +138,7 @@ impl Monitor {
         for stream in streams.iter() {
             let base_url = get_base_url(&stream.url);
             if let Some(sd) = data.get(&base_url) {
-                let variants: Vec<VariantStatus> = sd
+                let mut variants: Vec<VariantStatus> = sd
                     .variants
                     .iter()
                     .map(|(key, vs)| VariantStatus {
@@ -147,8 +152,32 @@ impl Monitor {
                         cue_out_duration: vs.cue_out_duration,
                         cue_out_count: vs.cue_out_count,
                         cue_in_count: vs.cue_in_count,
+                        consecutive_failures: sd
+                            .variant_failures
+                            .get(key)
+                            .copied()
+                            .unwrap_or(0),
                     })
                     .collect();
+
+                for (key, media_type) in &sd.known_variants {
+                    if !sd.variants.contains_key(key) {
+                        let failures = sd.variant_failures.get(key).copied().unwrap_or(0);
+                        variants.push(VariantStatus {
+                            variant_key: key.clone(),
+                            media_type: media_type.clone(),
+                            media_sequence: 0,
+                            discontinuity_sequence: 0,
+                            segment_count: 0,
+                            playlist_duration_secs: 0.0,
+                            in_cue_out: false,
+                            cue_out_duration: None,
+                            cue_out_count: 0,
+                            cue_in_count: 0,
+                            consecutive_failures: failures,
+                        });
+                    }
+                }
 
                 result.push(StreamStatus {
                     stream_id: stream.id.clone(),
@@ -213,6 +242,7 @@ impl Monitor {
         let stream_data = Arc::clone(&self.stream_data);
         let loader = Arc::clone(&self.loader);
         let checks = Arc::clone(&self.checks);
+        let stream_checks = Arc::clone(&self.stream_checks);
         let config = self.config.clone();
         let last_checked = Arc::clone(&self.last_checked);
         let total_errors = Arc::clone(&self.total_errors_per_stream);
@@ -241,6 +271,7 @@ impl Monitor {
                         stream,
                         &loader,
                         &checks,
+                        &stream_checks,
                         &stream_data,
                         &config,
                         &notification_tx,
@@ -296,6 +327,7 @@ impl Monitor {
                 stream,
                 &self.loader,
                 &self.checks,
+                &self.stream_checks,
                 &self.stream_data,
                 &self.config,
                 &self.notification_tx,
@@ -379,6 +411,15 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
             None
         }
     });
+    let gap = seg.unknown_tags.iter().any(|t| t.tag == "X-GAP");
+    let daterange = seg.daterange.as_ref().map(|dr| DateRangeSnapshot {
+        id: dr.id.clone(),
+        class: dr.class.clone(),
+        start_date: dr.start_date,
+        end_date: dr.end_date,
+        duration: dr.duration,
+        end_on_next: dr.end_on_next,
+    });
 
     SegmentSnapshot {
         uri: seg.uri.clone(),
@@ -387,6 +428,9 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
         cue_out,
         cue_in,
         cue_out_cont,
+        gap,
+        program_date_time: seg.program_date_time,
+        daterange,
     }
 }
 
@@ -403,6 +447,7 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
     let cue_out_count = segments.iter().filter(|s| s.cue_out).count();
     let cue_in_count = segments.iter().filter(|s| s.cue_in).count();
     let has_cue_out = cue_out_count > 0;
+    let has_gaps = segments.iter().any(|s| s.gap);
 
     PlaylistSnapshot {
         media_sequence: pl.media_sequence,
@@ -413,6 +458,10 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
         cue_in_count,
         has_cue_out,
         cue_out_duration: None,
+        target_duration: pl.target_duration as f64,
+        version: pl.version.and_then(|v| u16::try_from(v).ok()),
+        playlist_type: pl.playlist_type.as_ref().map(|pt| pt.to_string()),
+        has_gaps,
     }
 }
 
@@ -435,6 +484,7 @@ async fn poll_stream(
     stream: &StreamItem,
     loader: &Arc<dyn ManifestLoader>,
     checks: &Arc<Vec<Box<dyn Check>>>,
+    stream_checks: &Arc<Vec<Box<dyn stream_check::StreamCheck>>>,
     stream_data: &Arc<RwLock<HashMap<String, StreamData>>>,
     config: &MonitorConfig,
     notification_tx: &Option<UnboundedSender<Notification>>,
@@ -498,7 +548,12 @@ async fn poll_stream(
     for variant in &master.variants {
         let url = build_playlist_url(&base_url, &variant.uri);
         let key = variant_key(variant);
-        variant_targets.push((url, key, "VIDEO".to_string()));
+        let media_type = if variant.is_i_frame {
+            "I-FRAME".to_string()
+        } else {
+            "VIDEO".to_string()
+        };
+        variant_targets.push((url, key, media_type));
     }
 
     for media in &master.alternatives {
@@ -510,17 +565,21 @@ async fn poll_stream(
         }
     }
 
+    let concurrency = config.max_concurrent_fetches.max(1);
     let fetch_futures: Vec<_> = variant_targets
         .iter()
-        .map(|(url, _, _)| {
+        .enumerate()
+        .map(|(i, (url, _, _))| {
             let loader = Arc::clone(loader);
             let url = url.clone();
-            async move { loader.load(&url).await }
+            async move { (i, loader.load(&url).await) }
         })
         .collect();
-
-    let results: Vec<Result<String, crate::loader::LoadError>> =
-        futures::future::join_all(fetch_futures).await;
+    let results: Vec<(usize, Result<String, crate::loader::LoadError>)> =
+        stream::iter(fetch_futures)
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
 
     let mut content_changed = false;
 
@@ -530,7 +589,13 @@ async fn poll_stream(
             .entry(base_url.clone())
             .or_insert_with(|| StreamData::new(config.error_limit, config.event_limit));
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (_, key, media_type) in &variant_targets {
+            sd.known_variants
+                .entry(key.clone())
+                .or_insert_with(|| media_type.clone());
+        }
+
+        for (i, result) in results.into_iter() {
             let (variant_url, variant_key_str, media_type) = &variant_targets[i];
 
             let variant_body = match result {
@@ -546,6 +611,7 @@ async fn poll_stream(
                     )
                     .with_status_code(e.status_code().unwrap_or(0));
                     record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+                    *sd.variant_failures.entry(variant_key_str.clone()).or_insert(0) += 1;
                     continue;
                 }
             };
@@ -562,9 +628,12 @@ async fn poll_stream(
                         stream.id.as_str(),
                     );
                     record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+                    *sd.variant_failures.entry(variant_key_str.clone()).or_insert(0) += 1;
                     continue;
                 }
             };
+
+            sd.variant_failures.remove(variant_key_str);
 
             let snapshot = playlist_to_snapshot(&media_playlist);
 
@@ -624,6 +693,7 @@ async fn poll_stream(
                     cue_in_count: snapshot.cue_in_count,
                     in_cue_out: new_in_cue_out,
                     cue_out_duration: snapshot.cue_out_duration,
+                    version: snapshot.version,
                 };
                 sd.variants.insert(variant_key_str.clone(), new_state);
 
@@ -724,8 +794,20 @@ async fn poll_stream(
                     cue_in_count: snapshot.cue_in_count,
                     in_cue_out: has_cue_out && !has_cue_in,
                     cue_out_duration: snapshot.cue_out_duration,
+                    version: snapshot.version,
                 };
                 sd.variants.insert(variant_key_str.clone(), initial_state);
+            }
+        }
+
+        let stream_check_ctx = stream_check::StreamCheckContext {
+            stream_url: stream.url.clone(),
+            stream_id: stream.id.clone(),
+            variant_failures: sd.variant_failures.clone(),
+        };
+        for sc in stream_checks.iter() {
+            for e in sc.check(&sd.variants, &stream_check_ctx) {
+                record_error(sd, &mut all_errors, notification_tx, monitor_id, e);
             }
         }
 

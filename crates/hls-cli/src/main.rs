@@ -6,13 +6,13 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use hls_core::{
-    notification_channel, EventKind, HttpLoader, Monitor, MonitorConfig, StreamItem,
+    notification_channel, EventKind, HttpLoader, Monitor, MonitorConfig, MonitorError, StreamItem,
     WebhookDispatcher,
 };
 
@@ -36,6 +36,69 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Args)]
+struct CheckArgs {
+    /// Validate SCTE-35 CUE-OUT/CUE-IN ad break markers.
+    #[arg(long, default_value_t = false)]
+    scte35: bool,
+
+    /// HTTP request timeout in milliseconds [default: 10000].
+    #[arg(long)]
+    request_timeout: Option<u64>,
+
+    /// Max seconds a segment may exceed EXT-X-TARGETDURATION [default: 0.5].
+    #[arg(long)]
+    target_duration_tolerance: Option<f64>,
+
+    /// Max allowed jump in EXT-X-MEDIA-SEQUENCE between polls [default: 5].
+    #[arg(long)]
+    mseq_gap_threshold: Option<u64>,
+
+    /// Max media-sequence difference between variants before flagging drift [default: 3].
+    #[arg(long)]
+    variant_sync_drift_threshold: Option<u64>,
+
+    /// Consecutive fetch failures before a variant is reported unavailable [default: 3].
+    #[arg(long)]
+    variant_failure_threshold: Option<u32>,
+
+    /// Min ratio of a segment's duration to target duration before flagging [default: 0.5].
+    #[arg(long)]
+    segment_duration_anomaly_ratio: Option<f64>,
+
+    /// Max concurrent variant playlist fetches [default: 4].
+    #[arg(long)]
+    max_concurrent_fetches: Option<usize>,
+}
+
+impl CheckArgs {
+    fn to_monitor_config(&self) -> MonitorConfig {
+        let mut config = MonitorConfig::default().with_scte35(self.scte35);
+        if let Some(ms) = self.request_timeout {
+            config.request_timeout = std::time::Duration::from_millis(ms);
+        }
+        if let Some(v) = self.target_duration_tolerance {
+            config = config.with_target_duration_tolerance(v);
+        }
+        if let Some(v) = self.mseq_gap_threshold {
+            config = config.with_mseq_gap_threshold(v);
+        }
+        if let Some(v) = self.variant_sync_drift_threshold {
+            config = config.with_variant_sync_drift_threshold(v);
+        }
+        if let Some(v) = self.variant_failure_threshold {
+            config = config.with_variant_failure_threshold(v);
+        }
+        if let Some(v) = self.segment_duration_anomaly_ratio {
+            config = config.with_segment_duration_anomaly_ratio(v);
+        }
+        if let Some(v) = self.max_concurrent_fetches {
+            config = config.with_max_concurrent_fetches(v);
+        }
+        config
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start the HTTP API server.
@@ -48,6 +111,18 @@ enum Commands {
         #[arg(short, long)]
         config: Option<PathBuf>,
     },
+    /// Validate an HLS playlist tree once and exit with a report.
+    Validate {
+        /// Master playlist URL to validate.
+        url: String,
+
+        /// Output errors as JSON array.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+
+        #[command(flatten)]
+        checks: CheckArgs,
+    },
     /// Monitor a single stream from the command line (no API server).
     Watch {
         /// Master playlist URL to monitor.
@@ -57,17 +132,16 @@ enum Commands {
         #[arg(long, default_value_t = 6000)]
         stale_limit: u64,
 
-        /// Poll interval in milliseconds.
+        /// Poll interval in milliseconds [default: stale_limit / 2].
         #[arg(long)]
         poll_interval: Option<u64>,
-
-        /// Enable SCTE-35/CUE marker validation.
-        #[arg(long, default_value_t = false)]
-        scte35: bool,
 
         /// Optional webhook URL to POST notifications to.
         #[arg(long)]
         webhook_url: Option<String>,
+
+        #[command(flatten)]
+        checks: CheckArgs,
     },
 }
 
@@ -79,20 +153,82 @@ async fn main() {
         Commands::Serve { listen, config } => {
             run_serve(listen, config).await;
         }
+        Commands::Validate { url, json, checks } => {
+            fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+                )
+                .init();
+            run_validate(url, json, checks).await;
+        }
         Commands::Watch {
             url,
             stale_limit,
             poll_interval,
-            scte35,
             webhook_url,
+            checks,
         } => {
             fmt()
                 .with_env_filter(
                     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
                 )
                 .init();
-            run_watch(url, stale_limit, poll_interval, scte35, webhook_url).await;
+            run_watch(url, stale_limit, poll_interval, webhook_url, checks).await;
         }
+    }
+}
+
+async fn run_validate(url: String, json: bool, checks: CheckArgs) {
+    let config = checks.to_monitor_config();
+    let loader = Arc::new(HttpLoader::from_config(&config));
+    let stream = StreamItem {
+        id: "validate".to_string(),
+        url: url.clone(),
+    };
+
+    let monitor = Monitor::new(vec![stream], config, loader, None);
+    monitor.poll_once().await;
+    let errors = monitor.get_errors().await;
+
+    if json {
+        print_errors_json(&errors);
+    } else {
+        print_errors_styled(&errors);
+    }
+
+    if errors.is_empty() {
+        std::process::exit(0);
+    } else {
+        std::process::exit(1);
+    }
+}
+
+fn print_errors_json(errors: &[MonitorError]) {
+    let json = serde_json::to_string_pretty(errors).expect("MonitorError is Serialize");
+    println!("{json}");
+}
+
+fn print_errors_styled(errors: &[MonitorError]) {
+    if errors.is_empty() {
+        eprintln!("{}", style("No violations found.").green().bold());
+        return;
+    }
+
+    eprintln!(
+        "{} {} violation(s) found:\n",
+        style("!").red().bold(),
+        errors.len()
+    );
+
+    for e in errors {
+        eprintln!(
+            "  {} {:<20} {} {}  {}",
+            style(format!("{}", e.error_type)).red(),
+            e.variant,
+            style(&e.media_type).dim(),
+            style(&e.stream_url).dim(),
+            e.details,
+        );
     }
 }
 
@@ -207,13 +343,11 @@ async fn run_watch(
     url: String,
     stale_limit: u64,
     poll_interval: Option<u64>,
-    scte35: bool,
     webhook_url: Option<String>,
+    checks: CheckArgs,
 ) {
     let config = {
-        let mut c = MonitorConfig::default()
-            .with_stale_limit(stale_limit)
-            .with_scte35(scte35);
+        let mut c = checks.to_monitor_config().with_stale_limit(stale_limit);
         if let Some(pi) = poll_interval {
             c = c.with_poll_interval(pi);
         }
@@ -239,6 +373,7 @@ async fn run_watch(
         None
     };
 
+    let scte35_enabled = config.scte35_enabled;
     let loader = Arc::new(HttpLoader::from_config(&config));
     let stream = StreamItem {
         id: "stream_1".to_string(),
@@ -248,7 +383,7 @@ async fn run_watch(
     let monitor = Monitor::new(vec![stream], config, loader, notification_tx);
 
     let multi = MultiProgress::new();
-    let msg_style = ProgressStyle::with_template("{wide_msg}").expect("valid template");
+    let msg_style = ProgressStyle::with_template("{msg}").expect("valid template");
 
     multi
         .println(format!(
@@ -271,7 +406,7 @@ async fn run_watch(
         .println(format!("  {} {}ms", style("stale: ").dim(), stale_limit))
         .ok();
     multi
-        .println(format!("  {} {}", style("scte35:").dim(), scte35))
+        .println(format!("  {} {}", style("scte35:").dim(), scte35_enabled))
         .ok();
     if let Some(ref wh) = webhook_url {
         multi
@@ -377,11 +512,28 @@ async fn run_watch(
                 let mut variants: Vec<_> = ss.variants.iter().collect();
                 variants.sort_by(|a, b| a.variant_key.cmp(&b.variant_key));
                 for v in variants {
-                    let cue_badge = if v.in_cue_out {
-                        format!("  {}", style("CUE-OUT").yellow().bold())
-                    } else {
-                        String::new()
-                    };
+                    if v.consecutive_failures > 0 && v.segment_count == 0 {
+                        status_lines.push(format!(
+                            "  {:<16} {:<6} {}",
+                            v.variant_key,
+                            style(&v.media_type).dim(),
+                            style(format!("FAILING ({}x)", v.consecutive_failures))
+                                .red()
+                                .bold(),
+                        ));
+                        continue;
+                    }
+                    let mut badges = String::new();
+                    if v.in_cue_out {
+                        badges.push_str(&format!("  {}", style("CUE-OUT").yellow().bold()));
+                    }
+                    if v.consecutive_failures > 0 {
+                        badges.push_str(&format!(
+                            "  {}",
+                            style(format!("RETRY ({}x)", v.consecutive_failures))
+                                .red()
+                        ));
+                    }
                     status_lines.push(format!(
                         "  {:<16} {:<6} mseq={:<10} segs={:<4} {:.1}s{}",
                         v.variant_key,
@@ -389,7 +541,7 @@ async fn run_watch(
                         v.media_sequence,
                         v.segment_count,
                         v.playlist_duration_secs,
-                        cue_badge,
+                        badges,
                     ));
                 }
             }

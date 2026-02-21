@@ -50,6 +50,12 @@ pub struct CreateMonitorRequest {
     pub poll_interval: Option<u64>,
     #[serde(default)]
     pub scte35: bool,
+    pub target_duration_tolerance: Option<f64>,
+    pub mseq_gap_threshold: Option<u64>,
+    pub variant_sync_drift_threshold: Option<u64>,
+    pub variant_failure_threshold: Option<u32>,
+    pub segment_duration_anomaly_ratio: Option<f64>,
+    pub max_concurrent_fetches: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -215,6 +221,24 @@ async fn create_monitor(
         }
         if let Some(pi) = body.poll_interval {
             c = c.with_poll_interval(pi);
+        }
+        if let Some(v) = body.target_duration_tolerance {
+            c = c.with_target_duration_tolerance(v);
+        }
+        if let Some(v) = body.mseq_gap_threshold {
+            c = c.with_mseq_gap_threshold(v);
+        }
+        if let Some(v) = body.variant_sync_drift_threshold {
+            c = c.with_variant_sync_drift_threshold(v);
+        }
+        if let Some(v) = body.variant_failure_threshold {
+            c = c.with_variant_failure_threshold(v);
+        }
+        if let Some(v) = body.segment_duration_anomaly_ratio {
+            c = c.with_segment_duration_anomaly_ratio(v);
+        }
+        if let Some(v) = body.max_concurrent_fetches {
+            c = c.with_max_concurrent_fetches(v);
         }
         c
     };
