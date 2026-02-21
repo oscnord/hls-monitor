@@ -548,7 +548,12 @@ async fn poll_stream(
     for variant in &master.variants {
         let url = build_playlist_url(&base_url, &variant.uri);
         let key = variant_key(variant);
-        variant_targets.push((url, key, "VIDEO".to_string()));
+        let media_type = if variant.is_i_frame {
+            "I-FRAME".to_string()
+        } else {
+            "VIDEO".to_string()
+        };
+        variant_targets.push((url, key, media_type));
     }
 
     for media in &master.alternatives {
