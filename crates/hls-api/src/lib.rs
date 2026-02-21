@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod app;
 pub mod error;
 pub mod metrics;

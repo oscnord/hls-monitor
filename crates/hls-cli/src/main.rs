@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod config;
 
 use std::net::SocketAddr;
