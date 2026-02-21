@@ -62,11 +62,11 @@ hls-monitor watch https://example.com/master.m3u8 \
   --webhook-url https://hooks.example.com/alerts
 ```
 
-One-shot validation (fetch once, report, exit):
+One-shot validation (fetch once, report, exit). Works with live, VOD, and EVENT playlists:
 
 ```
 hls-monitor validate https://example.com/master.m3u8
-hls-monitor validate https://example.com/master.m3u8 --json
+hls-monitor validate https://example.com/vod/playlist.m3u8 --json
 ```
 
 Exit code `0` means no violations, `1` means violations found. Use `--json` for machine-readable output.
