@@ -11,6 +11,8 @@ pub mod mseq_gap;
 pub mod playlist_type;
 pub mod segment_duration_anomaly;
 pub mod version;
+pub mod program_date_time;
+pub mod daterange;
 
 use super::error::MonitorError;
 use super::state::{CheckContext, PlaylistSnapshot, VariantState};
@@ -52,6 +54,8 @@ pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Chec
     checks.push(Box::new(playlist_type::PlaylistTypeCheck));
     checks.push(Box::new(segment_duration_anomaly::SegmentDurationAnomalyCheck::new(config.segment_duration_anomaly_ratio)));
     checks.push(Box::new(version::VersionCheck));
+    checks.push(Box::new(program_date_time::ProgramDateTimeCheck));
+    checks.push(Box::new(daterange::DateRangeCheck));
 
     checks
 }
