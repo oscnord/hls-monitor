@@ -383,7 +383,7 @@ async fn run_watch(
     let monitor = Monitor::new(vec![stream], config, loader, notification_tx);
 
     let multi = MultiProgress::new();
-    let msg_style = ProgressStyle::with_template("{wide_msg}").expect("valid template");
+    let msg_style = ProgressStyle::with_template("{msg}").expect("valid template");
 
     multi
         .println(format!(
@@ -547,7 +547,6 @@ async fn run_watch(
             }
         }
 
-        status_lines.push(String::new());
         status_bar.set_message(status_lines.join("\n"));
     }
 }
