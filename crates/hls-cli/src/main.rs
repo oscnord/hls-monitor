@@ -12,7 +12,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use hls_core::{
-    notification_channel, EventKind, HttpLoader, Monitor, MonitorConfig, StreamItem,
+    notification_channel, EventKind, HttpLoader, Monitor, MonitorConfig, MonitorError, StreamItem,
     WebhookDispatcher,
 };
 
@@ -48,6 +48,15 @@ enum Commands {
         #[arg(short, long)]
         config: Option<PathBuf>,
     },
+    /// Validate an HLS playlist tree once and exit with a report.
+    Validate {
+        /// Master playlist URL to validate.
+        url: String,
+
+        /// Output errors as JSON array.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Monitor a single stream from the command line (no API server).
     Watch {
         /// Master playlist URL to monitor.
@@ -79,6 +88,14 @@ async fn main() {
         Commands::Serve { listen, config } => {
             run_serve(listen, config).await;
         }
+        Commands::Validate { url, json } => {
+            fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+                )
+                .init();
+            run_validate(url, json).await;
+        }
         Commands::Watch {
             url,
             stale_limit,
@@ -93,6 +110,60 @@ async fn main() {
                 .init();
             run_watch(url, stale_limit, poll_interval, scte35, webhook_url).await;
         }
+    }
+}
+
+async fn run_validate(url: String, json: bool) {
+    let config = MonitorConfig::default();
+    let loader = Arc::new(HttpLoader::from_config(&config));
+    let stream = StreamItem {
+        id: "validate".to_string(),
+        url: url.clone(),
+    };
+
+    let monitor = Monitor::new(vec![stream], config, loader, None);
+    monitor.poll_once().await;
+    let errors = monitor.get_errors().await;
+
+    if json {
+        print_errors_json(&errors);
+    } else {
+        print_errors_styled(&errors);
+    }
+
+    if errors.is_empty() {
+        std::process::exit(0);
+    } else {
+        std::process::exit(1);
+    }
+}
+
+fn print_errors_json(errors: &[MonitorError]) {
+    let json = serde_json::to_string_pretty(errors).expect("MonitorError is Serialize");
+    println!("{json}");
+}
+
+fn print_errors_styled(errors: &[MonitorError]) {
+    if errors.is_empty() {
+        eprintln!("{}", style("No violations found.").green().bold());
+        return;
+    }
+
+    eprintln!(
+        "{} {} violation(s) found:\n",
+        style("!").red().bold(),
+        errors.len()
+    );
+
+    for e in errors {
+        eprintln!(
+            "  {} {:<20} {} {}  {}",
+            style(format!("{}", e.error_type)).red(),
+            e.variant,
+            style(&e.media_type).dim(),
+            style(&e.stream_url).dim(),
+            e.details,
+        );
     }
 }
 
