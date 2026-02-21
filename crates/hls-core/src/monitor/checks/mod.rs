@@ -13,6 +13,9 @@ pub mod segment_duration_anomaly;
 pub mod version;
 pub mod program_date_time;
 pub mod daterange;
+pub mod stream_check;
+pub mod variant_sync_drift;
+pub mod variant_availability;
 
 use super::error::MonitorError;
 use super::state::{CheckContext, PlaylistSnapshot, VariantState};
@@ -58,4 +61,11 @@ pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Chec
     checks.push(Box::new(daterange::DateRangeCheck));
 
     checks
+}
+
+pub fn default_stream_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn stream_check::StreamCheck>> {
+    vec![
+        Box::new(variant_sync_drift::VariantSyncDriftCheck::new(config.variant_sync_drift_threshold)),
+        Box::new(variant_availability::VariantAvailabilityCheck::new(config.variant_failure_threshold)),
+    ]
 }

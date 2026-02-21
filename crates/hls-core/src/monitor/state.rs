@@ -115,6 +115,7 @@ pub struct StreamData {
     pub errors: ErrorRing,
     pub events: EventRing,
     pub was_stale: bool,
+    pub variant_failures: HashMap<String, u32>,
 }
 
 impl StreamData {
@@ -127,6 +128,7 @@ impl StreamData {
             errors: ErrorRing::new(error_capacity),
             events: EventRing::new(event_capacity),
             was_stale: false,
+            variant_failures: HashMap::new(),
         }
     }
 }

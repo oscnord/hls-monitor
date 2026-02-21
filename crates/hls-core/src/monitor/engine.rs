@@ -12,7 +12,8 @@ use uuid::Uuid;
 use crate::config::MonitorConfig;
 use crate::loader::ManifestLoader;
 use crate::monitor::checks::stale_manifest::check_stale;
-use crate::monitor::checks::{default_checks, Check};
+use crate::monitor::checks::stream_check;
+use crate::monitor::checks::{default_checks, default_stream_checks, Check};
 use crate::monitor::error::{ErrorType, MonitorError};
 use crate::monitor::event::{EventKind, MonitorEvent};
 use crate::monitor::state::*;
@@ -27,6 +28,7 @@ pub struct Monitor {
     state: Arc<RwLock<MonitorState>>,
     loader: Arc<dyn ManifestLoader>,
     checks: Arc<Vec<Box<dyn Check>>>,
+    stream_checks: Arc<Vec<Box<dyn stream_check::StreamCheck>>>,
     created_at: chrono::DateTime<Utc>,
     last_checked: Arc<RwLock<Option<chrono::DateTime<Utc>>>>,
     total_errors_per_stream: Arc<RwLock<HashMap<String, u64>>>,
@@ -43,6 +45,7 @@ impl Monitor {
         notification_tx: Option<UnboundedSender<Notification>>,
     ) -> Self {
         let checks = default_checks(&config);
+        let stream_checks = default_stream_checks(&config);
         let id = Uuid::new_v4();
         Self {
             monitor_id: id.to_string(),
@@ -53,6 +56,7 @@ impl Monitor {
             state: Arc::new(RwLock::new(MonitorState::Idle)),
             loader,
             checks: Arc::new(checks),
+            stream_checks: Arc::new(stream_checks),
             created_at: Utc::now(),
             last_checked: Arc::new(RwLock::new(None)),
             total_errors_per_stream: Arc::new(RwLock::new(HashMap::new())),
@@ -213,6 +217,7 @@ impl Monitor {
         let stream_data = Arc::clone(&self.stream_data);
         let loader = Arc::clone(&self.loader);
         let checks = Arc::clone(&self.checks);
+        let stream_checks = Arc::clone(&self.stream_checks);
         let config = self.config.clone();
         let last_checked = Arc::clone(&self.last_checked);
         let total_errors = Arc::clone(&self.total_errors_per_stream);
@@ -241,6 +246,7 @@ impl Monitor {
                         stream,
                         &loader,
                         &checks,
+                        &stream_checks,
                         &stream_data,
                         &config,
                         &notification_tx,
@@ -296,6 +302,7 @@ impl Monitor {
                 stream,
                 &self.loader,
                 &self.checks,
+                &self.stream_checks,
                 &self.stream_data,
                 &self.config,
                 &self.notification_tx,
@@ -452,6 +459,7 @@ async fn poll_stream(
     stream: &StreamItem,
     loader: &Arc<dyn ManifestLoader>,
     checks: &Arc<Vec<Box<dyn Check>>>,
+    stream_checks: &Arc<Vec<Box<dyn stream_check::StreamCheck>>>,
     stream_data: &Arc<RwLock<HashMap<String, StreamData>>>,
     config: &MonitorConfig,
     notification_tx: &Option<UnboundedSender<Notification>>,
@@ -563,6 +571,7 @@ async fn poll_stream(
                     )
                     .with_status_code(e.status_code().unwrap_or(0));
                     record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+                    *sd.variant_failures.entry(variant_key_str.clone()).or_insert(0) += 1;
                     continue;
                 }
             };
@@ -579,9 +588,12 @@ async fn poll_stream(
                         stream.id.as_str(),
                     );
                     record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+                    *sd.variant_failures.entry(variant_key_str.clone()).or_insert(0) += 1;
                     continue;
                 }
             };
+
+            sd.variant_failures.remove(variant_key_str);
 
             let snapshot = playlist_to_snapshot(&media_playlist);
 
@@ -745,6 +757,17 @@ async fn poll_stream(
                     version: snapshot.version,
                 };
                 sd.variants.insert(variant_key_str.clone(), initial_state);
+            }
+        }
+
+        let stream_check_ctx = stream_check::StreamCheckContext {
+            stream_url: stream.url.clone(),
+            stream_id: stream.id.clone(),
+            variant_failures: sd.variant_failures.clone(),
+        };
+        for sc in stream_checks.iter() {
+            for e in sc.check(&sd.variants, &stream_check_ctx) {
+                record_error(sd, &mut all_errors, notification_tx, monitor_id, e);
             }
         }
 
