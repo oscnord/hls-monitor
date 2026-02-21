@@ -8,6 +8,9 @@ pub mod scte35;
 pub mod target_duration;
 pub mod gap;
 pub mod mseq_gap;
+pub mod playlist_type;
+pub mod segment_duration_anomaly;
+pub mod version;
 
 use super::error::MonitorError;
 use super::state::{CheckContext, PlaylistSnapshot, VariantState};
@@ -46,6 +49,9 @@ pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Chec
     checks.push(Box::new(target_duration::TargetDurationCheck::new(config.target_duration_tolerance)));
     checks.push(Box::new(gap::GapCheck));
     checks.push(Box::new(mseq_gap::MseqGapCheck::new(config.mseq_gap_threshold)));
+    checks.push(Box::new(playlist_type::PlaylistTypeCheck));
+    checks.push(Box::new(segment_duration_anomaly::SegmentDurationAnomalyCheck::new(config.segment_duration_anomaly_ratio)));
+    checks.push(Box::new(version::VersionCheck));
 
     checks
 }
