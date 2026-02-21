@@ -42,7 +42,7 @@ impl Monitor {
         loader: Arc<dyn ManifestLoader>,
         notification_tx: Option<UnboundedSender<Notification>>,
     ) -> Self {
-        let checks = default_checks(config.scte35_enabled);
+        let checks = default_checks(&config);
         let id = Uuid::new_v4();
         Self {
             monitor_id: id.to_string(),

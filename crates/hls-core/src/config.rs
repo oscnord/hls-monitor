@@ -21,6 +21,11 @@ pub struct MonitorConfig {
     pub scte35_enabled: bool,
     /// Maximum number of events to retain per stream (ring buffer capacity).
     pub event_limit: usize,
+    pub target_duration_tolerance: f64,
+    pub mseq_gap_threshold: u64,
+    pub variant_sync_drift_threshold: u64,
+    pub variant_failure_threshold: u32,
+    pub segment_duration_anomaly_ratio: f64,
 }
 
 impl Default for MonitorConfig {
@@ -35,6 +40,11 @@ impl Default for MonitorConfig {
             retry_backoff: Duration::from_millis(100),
             scte35_enabled: false,
             event_limit: 200,
+            target_duration_tolerance: 0.5,
+            mseq_gap_threshold: 5,
+            variant_sync_drift_threshold: 3,
+            variant_failure_threshold: 3,
+            segment_duration_anomaly_ratio: 0.5,
         }
     }
 }
@@ -69,6 +79,31 @@ impl MonitorConfig {
 
     pub fn with_event_limit(mut self, limit: usize) -> Self {
         self.event_limit = limit;
+        self
+    }
+
+    pub fn with_target_duration_tolerance(mut self, tolerance: f64) -> Self {
+        self.target_duration_tolerance = tolerance;
+        self
+    }
+
+    pub fn with_mseq_gap_threshold(mut self, threshold: u64) -> Self {
+        self.mseq_gap_threshold = threshold;
+        self
+    }
+
+    pub fn with_variant_sync_drift_threshold(mut self, threshold: u64) -> Self {
+        self.variant_sync_drift_threshold = threshold;
+        self
+    }
+
+    pub fn with_variant_failure_threshold(mut self, threshold: u32) -> Self {
+        self.variant_failure_threshold = threshold;
+        self
+    }
+
+    pub fn with_segment_duration_anomaly_ratio(mut self, ratio: f64) -> Self {
+        self.segment_duration_anomaly_ratio = ratio;
         self
     }
 }

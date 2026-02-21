@@ -27,7 +27,7 @@ pub trait Check: Send + Sync {
 }
 
 /// Build the default set of checks based on configuration.
-pub fn default_checks(scte35_enabled: bool) -> Vec<Box<dyn Check>> {
+pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Check>> {
     let mut checks: Vec<Box<dyn Check>> = vec![
         Box::new(media_sequence::MediaSequenceCheck),
         Box::new(playlist_size::PlaylistSizeCheck),
@@ -36,7 +36,7 @@ pub fn default_checks(scte35_enabled: bool) -> Vec<Box<dyn Check>> {
         Box::new(discontinuity::DiscontinuityCheck),
     ];
 
-    if scte35_enabled {
+    if config.scte35_enabled {
         checks.push(Box::new(scte35::Scte35Check));
     }
 
