@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hls_core::{EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
+use hls_core::{ErrorType, EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
 
 const MASTER_URL: &str = "https://mock.mock.com/channels/1xx/master.m3u8";
 const LEVEL0_URL: &str = "https://mock.mock.com/channels/1xx/level_0.m3u8";
@@ -543,10 +543,14 @@ async fn test_discontinuity_passable_large_mseq_jump() {
     ];
 
     let errors = run_sequence(level0, level1, 4).await;
+    let disc_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.error_type == ErrorType::DiscontinuitySequence)
+        .collect();
     assert!(
-        errors.is_empty(),
-        "Expected no errors, got: {:#?}",
-        errors.iter().map(|e| &e.details).collect::<Vec<_>>()
+        disc_errors.is_empty(),
+        "Expected no discontinuity errors, got: {:#?}",
+        disc_errors.iter().map(|e| &e.details).collect::<Vec<_>>()
     );
 }
 

@@ -5,6 +5,9 @@ pub mod segment_continuity;
 pub mod discontinuity;
 pub mod stale_manifest;
 pub mod scte35;
+pub mod target_duration;
+pub mod gap;
+pub mod mseq_gap;
 
 use super::error::MonitorError;
 use super::state::{CheckContext, PlaylistSnapshot, VariantState};
@@ -39,6 +42,10 @@ pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Chec
     if config.scte35_enabled {
         checks.push(Box::new(scte35::Scte35Check));
     }
+
+    checks.push(Box::new(target_duration::TargetDurationCheck::new(config.target_duration_tolerance)));
+    checks.push(Box::new(gap::GapCheck));
+    checks.push(Box::new(mseq_gap::MseqGapCheck::new(config.mseq_gap_threshold)));
 
     checks
 }
