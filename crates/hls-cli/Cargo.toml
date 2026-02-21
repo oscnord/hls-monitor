@@ -1,0 +1,24 @@
+[package]
+name = "hls-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI tool for HLS stream monitoring"
+
+[[bin]]
+name = "hls-monitor"
+path = "src/main.rs"
+
+[dependencies]
+hls-core = { path = "../hls-core" }
+hls-api = { path = "../hls-api" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+indicatif = "0.17"
+toml = "0.8"
+url = "2"

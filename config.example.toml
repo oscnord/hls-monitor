@@ -1,0 +1,35 @@
+# HLS Monitor — example configuration
+# Copy to config.toml and adjust to your needs.
+
+[server]
+# listen = "0.0.0.0:8080"
+# log_format = "pretty"             # "pretty" or "json"
+
+[defaults]
+# stale_limit_ms = 6000             # max age before a manifest is considered stale
+# poll_interval_ms = 4000           # omit to auto-derive from stale_limit
+# scte35 = false                    # enable SCTE-35 / CUE marker validation
+# error_limit = 100                 # max errors kept per monitor
+# event_limit = 200                 # max events kept per monitor
+
+[[webhook]]
+url = "https://hooks.example.com/hls-alerts"
+# events = []                       # empty = deliver all notification types
+# timeout_ms = 5000
+# max_retries = 2
+# secret = "hmac-sha256-key"        # signs payload with X-HLS-Signature-256
+
+[[monitor]]
+id = "live-channel-1"
+stale_limit_ms = 8000
+scte35 = true
+streams = [
+  { id = "cdn-primary", url = "https://cdn1.example.com/live/master.m3u8" },
+  { url = "https://cdn2.example.com/live/master.m3u8" },
+]
+
+[[monitor]]
+id = "live-channel-2"
+streams = [
+  { url = "https://cdn3.example.com/live/master.m3u8" },
+]

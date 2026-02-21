@@ -1,0 +1,11 @@
+services:
+  hls-monitor:
+    build: .
+    ports:
+      - "8080:8080"
+    # volumes:
+    #   - ./config.toml:/etc/hls-monitor/config.toml:ro
+    # command: ["serve", "--config", "/etc/hls-monitor/config.toml"]
+    environment:
+      RUST_LOG: info
+    restart: unless-stopped
