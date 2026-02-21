@@ -152,40 +152,6 @@ async fn run_sequence(
     monitor.get_errors().await
 }
 
-#[allow(dead_code)]
-async fn run_sequence_with_config(
-    level0_steps: Vec<String>,
-    level1_steps: Vec<String>,
-    num_polls: usize,
-    config: MonitorConfig,
-) -> Vec<hls_core::MonitorError> {
-    let step = Arc::new(AtomicUsize::new(0));
-
-    let mut responses = HashMap::new();
-    responses.insert(MASTER_URL.to_string(), vec![MASTER_PLAYLIST.to_string()]);
-    responses.insert(LEVEL0_URL.to_string(), level0_steps);
-    responses.insert(LEVEL1_URL.to_string(), level1_steps);
-
-    let loader = Arc::new(SequenceLoader {
-        step: Arc::clone(&step),
-        responses,
-    });
-
-    let stream = StreamItem {
-        id: "stream_1".to_string(),
-        url: MASTER_URL.to_string(),
-    };
-
-    let monitor = Monitor::new(vec![stream], config, loader, None);
-
-    for poll in 0..num_polls {
-        step.store(poll, Ordering::SeqCst);
-        monitor.poll_once().await;
-    }
-
-    monitor.get_errors().await
-}
-
 async fn run_sequence_with_events(
     level0_steps: Vec<String>,
     level1_steps: Vec<String>,
