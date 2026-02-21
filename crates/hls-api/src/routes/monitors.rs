@@ -337,7 +337,7 @@ async fn start_monitor(
 
     m.start()
         .await
-        .map_err(|e| ApiError::Internal(e))?;
+        .map_err(ApiError::Internal)?;
 
     Ok(Json(MessageResponse {
         message: "Monitor started".into(),
@@ -447,7 +447,7 @@ async fn remove_stream(
 
     m.remove_stream(&stream_id)
         .await
-        .map_err(|e| ApiError::NotFound(e))?;
+        .map_err(ApiError::NotFound)?;
 
     let remaining = m.streams().await;
 
