@@ -65,6 +65,10 @@ struct CheckArgs {
     /// Min ratio of a segment's duration to target duration before flagging [default: 0.5].
     #[arg(long)]
     segment_duration_anomaly_ratio: Option<f64>,
+
+    /// Max concurrent variant playlist fetches [default: 4].
+    #[arg(long)]
+    max_concurrent_fetches: Option<usize>,
 }
 
 impl CheckArgs {
@@ -87,6 +91,9 @@ impl CheckArgs {
         }
         if let Some(v) = self.segment_duration_anomaly_ratio {
             config = config.with_segment_duration_anomaly_ratio(v);
+        }
+        if let Some(v) = self.max_concurrent_fetches {
+            config = config.with_max_concurrent_fetches(v);
         }
         config
     }
@@ -505,11 +512,28 @@ async fn run_watch(
                 let mut variants: Vec<_> = ss.variants.iter().collect();
                 variants.sort_by(|a, b| a.variant_key.cmp(&b.variant_key));
                 for v in variants {
-                    let cue_badge = if v.in_cue_out {
-                        format!("  {}", style("CUE-OUT").yellow().bold())
-                    } else {
-                        String::new()
-                    };
+                    if v.consecutive_failures > 0 && v.segment_count == 0 {
+                        status_lines.push(format!(
+                            "  {:<16} {:<6} {}",
+                            v.variant_key,
+                            style(&v.media_type).dim(),
+                            style(format!("FAILING ({}x)", v.consecutive_failures))
+                                .red()
+                                .bold(),
+                        ));
+                        continue;
+                    }
+                    let mut badges = String::new();
+                    if v.in_cue_out {
+                        badges.push_str(&format!("  {}", style("CUE-OUT").yellow().bold()));
+                    }
+                    if v.consecutive_failures > 0 {
+                        badges.push_str(&format!(
+                            "  {}",
+                            style(format!("RETRY ({}x)", v.consecutive_failures))
+                                .red()
+                        ));
+                    }
                     status_lines.push(format!(
                         "  {:<16} {:<6} mseq={:<10} segs={:<4} {:.1}s{}",
                         v.variant_key,
@@ -517,7 +541,7 @@ async fn run_watch(
                         v.media_sequence,
                         v.segment_count,
                         v.playlist_duration_secs,
-                        cue_badge,
+                        badges,
                     ));
                 }
             }

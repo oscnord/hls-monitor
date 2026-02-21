@@ -110,6 +110,7 @@ pub struct CheckContext {
 #[derive(Debug)]
 pub struct StreamData {
     pub variants: HashMap<String, VariantState>,
+    pub known_variants: HashMap<String, String>,
     pub last_content_change: DateTime<Utc>,
     pub last_fetch: DateTime<Utc>,
     pub errors: ErrorRing,
@@ -123,6 +124,7 @@ impl StreamData {
         let now = Utc::now();
         Self {
             variants: HashMap::new(),
+            known_variants: HashMap::new(),
             last_content_change: now,
             last_fetch: now,
             errors: ErrorRing::new(error_capacity),
@@ -157,6 +159,7 @@ pub struct VariantStatus {
     pub cue_out_duration: Option<f64>,
     pub cue_out_count: usize,
     pub cue_in_count: usize,
+    pub consecutive_failures: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

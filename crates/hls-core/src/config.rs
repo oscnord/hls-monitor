@@ -26,6 +26,7 @@ pub struct MonitorConfig {
     pub variant_sync_drift_threshold: u64,
     pub variant_failure_threshold: u32,
     pub segment_duration_anomaly_ratio: f64,
+    pub max_concurrent_fetches: usize,
 }
 
 impl Default for MonitorConfig {
@@ -45,6 +46,7 @@ impl Default for MonitorConfig {
             variant_sync_drift_threshold: 3,
             variant_failure_threshold: 3,
             segment_duration_anomaly_ratio: 0.5,
+            max_concurrent_fetches: 4,
         }
     }
 }
@@ -104,6 +106,11 @@ impl MonitorConfig {
 
     pub fn with_segment_duration_anomaly_ratio(mut self, ratio: f64) -> Self {
         self.segment_duration_anomaly_ratio = ratio;
+        self
+    }
+
+    pub fn with_max_concurrent_fetches(mut self, max: usize) -> Self {
+        self.max_concurrent_fetches = max.max(1);
         self
     }
 }

@@ -104,6 +104,9 @@ pub struct DefaultsConfig {
 
     #[serde(default)]
     pub segment_duration_anomaly_ratio: Option<f64>,
+
+    #[serde(default)]
+    pub max_concurrent_fetches: Option<usize>,
 }
 
 impl Default for DefaultsConfig {
@@ -119,6 +122,7 @@ impl Default for DefaultsConfig {
             variant_sync_drift_threshold: None,
             variant_failure_threshold: None,
             segment_duration_anomaly_ratio: None,
+            max_concurrent_fetches: None,
         }
     }
 }
@@ -160,6 +164,9 @@ impl DefaultsConfig {
         if let Some(v) = self.segment_duration_anomaly_ratio {
             c = c.with_segment_duration_anomaly_ratio(v);
         }
+        if let Some(v) = self.max_concurrent_fetches {
+            c = c.with_max_concurrent_fetches(v);
+        }
         c
     }
 }
@@ -175,6 +182,7 @@ pub struct MonitorDef {
     pub variant_sync_drift_threshold: Option<u64>,
     pub variant_failure_threshold: Option<u32>,
     pub segment_duration_anomaly_ratio: Option<f64>,
+    pub max_concurrent_fetches: Option<usize>,
 
     #[serde(default)]
     pub streams: Vec<StreamDef>,
@@ -212,6 +220,9 @@ impl MonitorDef {
         }
         if let Some(v) = self.segment_duration_anomaly_ratio {
             c = c.with_segment_duration_anomaly_ratio(v);
+        }
+        if let Some(v) = self.max_concurrent_fetches {
+            c = c.with_max_concurrent_fetches(v);
         }
         c
     }

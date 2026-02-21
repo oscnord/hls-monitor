@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use m3u8_rs::Playlist;
 use rand::Rng;
 use tokio::sync::mpsc::UnboundedSender;
@@ -137,7 +138,7 @@ impl Monitor {
         for stream in streams.iter() {
             let base_url = get_base_url(&stream.url);
             if let Some(sd) = data.get(&base_url) {
-                let variants: Vec<VariantStatus> = sd
+                let mut variants: Vec<VariantStatus> = sd
                     .variants
                     .iter()
                     .map(|(key, vs)| VariantStatus {
@@ -151,8 +152,32 @@ impl Monitor {
                         cue_out_duration: vs.cue_out_duration,
                         cue_out_count: vs.cue_out_count,
                         cue_in_count: vs.cue_in_count,
+                        consecutive_failures: sd
+                            .variant_failures
+                            .get(key)
+                            .copied()
+                            .unwrap_or(0),
                     })
                     .collect();
+
+                for (key, media_type) in &sd.known_variants {
+                    if !sd.variants.contains_key(key) {
+                        let failures = sd.variant_failures.get(key).copied().unwrap_or(0);
+                        variants.push(VariantStatus {
+                            variant_key: key.clone(),
+                            media_type: media_type.clone(),
+                            media_sequence: 0,
+                            discontinuity_sequence: 0,
+                            segment_count: 0,
+                            playlist_duration_secs: 0.0,
+                            in_cue_out: false,
+                            cue_out_duration: None,
+                            cue_out_count: 0,
+                            cue_in_count: 0,
+                            consecutive_failures: failures,
+                        });
+                    }
+                }
 
                 result.push(StreamStatus {
                     stream_id: stream.id.clone(),
@@ -535,17 +560,21 @@ async fn poll_stream(
         }
     }
 
+    let concurrency = config.max_concurrent_fetches.max(1);
     let fetch_futures: Vec<_> = variant_targets
         .iter()
-        .map(|(url, _, _)| {
+        .enumerate()
+        .map(|(i, (url, _, _))| {
             let loader = Arc::clone(loader);
             let url = url.clone();
-            async move { loader.load(&url).await }
+            async move { (i, loader.load(&url).await) }
         })
         .collect();
-
-    let results: Vec<Result<String, crate::loader::LoadError>> =
-        futures::future::join_all(fetch_futures).await;
+    let results: Vec<(usize, Result<String, crate::loader::LoadError>)> =
+        stream::iter(fetch_futures)
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
 
     let mut content_changed = false;
 
@@ -555,7 +584,13 @@ async fn poll_stream(
             .entry(base_url.clone())
             .or_insert_with(|| StreamData::new(config.error_limit, config.event_limit));
 
-        for (i, result) in results.into_iter().enumerate() {
+        for (_, key, media_type) in &variant_targets {
+            sd.known_variants
+                .entry(key.clone())
+                .or_insert_with(|| media_type.clone());
+        }
+
+        for (i, result) in results.into_iter() {
             let (variant_url, variant_key_str, media_type) = &variant_targets[i];
 
             let variant_body = match result {
