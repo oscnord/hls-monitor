@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -36,6 +36,62 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Args)]
+struct CheckArgs {
+    /// Validate SCTE-35 CUE-OUT/CUE-IN ad break markers.
+    #[arg(long, default_value_t = false)]
+    scte35: bool,
+
+    /// HTTP request timeout in milliseconds [default: 10000].
+    #[arg(long)]
+    request_timeout: Option<u64>,
+
+    /// Max seconds a segment may exceed EXT-X-TARGETDURATION [default: 0.5].
+    #[arg(long)]
+    target_duration_tolerance: Option<f64>,
+
+    /// Max allowed jump in EXT-X-MEDIA-SEQUENCE between polls [default: 5].
+    #[arg(long)]
+    mseq_gap_threshold: Option<u64>,
+
+    /// Max media-sequence difference between variants before flagging drift [default: 3].
+    #[arg(long)]
+    variant_sync_drift_threshold: Option<u64>,
+
+    /// Consecutive fetch failures before a variant is reported unavailable [default: 3].
+    #[arg(long)]
+    variant_failure_threshold: Option<u32>,
+
+    /// Min ratio of a segment's duration to target duration before flagging [default: 0.5].
+    #[arg(long)]
+    segment_duration_anomaly_ratio: Option<f64>,
+}
+
+impl CheckArgs {
+    fn to_monitor_config(&self) -> MonitorConfig {
+        let mut config = MonitorConfig::default().with_scte35(self.scte35);
+        if let Some(ms) = self.request_timeout {
+            config.request_timeout = std::time::Duration::from_millis(ms);
+        }
+        if let Some(v) = self.target_duration_tolerance {
+            config = config.with_target_duration_tolerance(v);
+        }
+        if let Some(v) = self.mseq_gap_threshold {
+            config = config.with_mseq_gap_threshold(v);
+        }
+        if let Some(v) = self.variant_sync_drift_threshold {
+            config = config.with_variant_sync_drift_threshold(v);
+        }
+        if let Some(v) = self.variant_failure_threshold {
+            config = config.with_variant_failure_threshold(v);
+        }
+        if let Some(v) = self.segment_duration_anomaly_ratio {
+            config = config.with_segment_duration_anomaly_ratio(v);
+        }
+        config
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start the HTTP API server.
@@ -56,6 +112,9 @@ enum Commands {
         /// Output errors as JSON array.
         #[arg(long, default_value_t = false)]
         json: bool,
+
+        #[command(flatten)]
+        checks: CheckArgs,
     },
     /// Monitor a single stream from the command line (no API server).
     Watch {
@@ -88,13 +147,13 @@ async fn main() {
         Commands::Serve { listen, config } => {
             run_serve(listen, config).await;
         }
-        Commands::Validate { url, json } => {
+        Commands::Validate { url, json, checks } => {
             fmt()
                 .with_env_filter(
                     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
                 )
                 .init();
-            run_validate(url, json).await;
+            run_validate(url, json, checks).await;
         }
         Commands::Watch {
             url,
@@ -113,8 +172,8 @@ async fn main() {
     }
 }
 
-async fn run_validate(url: String, json: bool) {
-    let config = MonitorConfig::default();
+async fn run_validate(url: String, json: bool, checks: CheckArgs) {
+    let config = checks.to_monitor_config();
     let loader = Arc::new(HttpLoader::from_config(&config));
     let stream = StreamItem {
         id: "validate".to_string(),
