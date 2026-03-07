@@ -9,8 +9,8 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use hls_api::app::build_app;
-use hls_api::state::AppState;
+use hls_monitor::api::app::build_app;
+use hls_monitor::api::state::AppState;
 
 fn app() -> axum::Router {
     let state = AppState::new();

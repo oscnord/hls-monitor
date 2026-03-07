@@ -30,9 +30,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use hls_core::{MonitorConfig, StreamItem, WebhookConfig};
+use crate::{MonitorConfig, StreamItem, WebhookConfig};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -48,12 +49,16 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
 
     #[serde(default = "default_log_format")]
     pub log_format: String,
+
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -61,6 +66,7 @@ impl Default for ServerConfig {
         Self {
             listen: default_listen(),
             log_format: default_log_format(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -74,6 +80,7 @@ fn default_log_format() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
     #[serde(default = "default_stale_limit_ms")]
     pub stale_limit_ms: u64,
@@ -172,6 +179,7 @@ impl DefaultsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MonitorDef {
     pub id: String,
     pub stale_limit_ms: Option<u64>,
@@ -189,6 +197,7 @@ pub struct MonitorDef {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StreamDef {
     pub id: Option<String>,
     pub url: String,
@@ -439,6 +448,20 @@ streams = [{ url = "https://example.com/m.m3u8" }]
         let config: AppConfig = toml::from_str(toml).unwrap();
         let err = config.validate().unwrap_err();
         assert!(err.contains("Invalid webhook URL"), "{}", err);
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let toml = r#"
+[defaults]
+stale_limitt_ms = 9000
+
+[[monitor]]
+id = "ok"
+streams = [{ url = "https://example.com/m.m3u8" }]
+"#;
+        let err = toml::from_str::<AppConfig>(toml).unwrap_err();
+        assert!(err.to_string().contains("unknown field"), "{}", err);
     }
 
     #[test]

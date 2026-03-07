@@ -4,25 +4,20 @@ FROM rust:1.83-bookworm AS builder
 WORKDIR /app
 
 # Copy manifests first for layer caching of dependency builds.
-COPY Cargo.toml Cargo.lock ./
-COPY crates/hls-core/Cargo.toml crates/hls-core/Cargo.toml
-COPY crates/hls-api/Cargo.toml  crates/hls-api/Cargo.toml
-COPY crates/hls-cli/Cargo.toml  crates/hls-cli/Cargo.toml
-
-# Create dummy source files so cargo can resolve the workspace and fetch deps.
-RUN mkdir -p crates/hls-core/src crates/hls-api/src crates/hls-cli/src && \
-    echo "pub fn _dummy() {}" > crates/hls-core/src/lib.rs && \
-    echo "pub fn _dummy() {}" > crates/hls-api/src/lib.rs && \
-    echo "fn main() {}" > crates/hls-cli/src/main.rs
+COPY Cargo.toml Cargo.lock build.rs ./
+RUN mkdir -p src && \
+    echo "pub fn _dummy() {}" > src/lib.rs && \
+    echo "fn main() {}" > src/main.rs
 
 # Build dependencies only (cached layer).
 RUN cargo build --release --bin hls-monitor 2>/dev/null || true
 
 # Now copy real source code.
-COPY crates/ crates/
+COPY src/ src/
+COPY tests/ tests/
 
 # Touch the real source files so cargo recompiles them (but not deps).
-RUN touch crates/hls-core/src/lib.rs crates/hls-api/src/lib.rs crates/hls-cli/src/main.rs
+RUN touch src/lib.rs src/main.rs
 
 # Build the final binary.
 RUN cargo build --release --bin hls-monitor

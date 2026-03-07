@@ -65,7 +65,7 @@ impl MonitorConfig {
     }
 
     pub fn with_poll_interval(mut self, ms: u64) -> Self {
-        self.poll_interval = Duration::from_millis(ms);
+        self.poll_interval = Duration::from_millis(ms.max(1));
         self
     }
 
@@ -85,12 +85,12 @@ impl MonitorConfig {
     }
 
     pub fn with_target_duration_tolerance(mut self, tolerance: f64) -> Self {
-        self.target_duration_tolerance = tolerance;
+        self.target_duration_tolerance = tolerance.max(0.0);
         self
     }
 
     pub fn with_mseq_gap_threshold(mut self, threshold: u64) -> Self {
-        self.mseq_gap_threshold = threshold;
+        self.mseq_gap_threshold = threshold.max(1);
         self
     }
 
@@ -105,12 +105,66 @@ impl MonitorConfig {
     }
 
     pub fn with_segment_duration_anomaly_ratio(mut self, ratio: f64) -> Self {
-        self.segment_duration_anomaly_ratio = ratio;
+        self.segment_duration_anomaly_ratio = ratio.clamp(0.0, 1.0);
         self
     }
 
     pub fn with_max_concurrent_fetches(mut self, max: usize) -> Self {
         self.max_concurrent_fetches = max.max(1);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_interval_clamped_to_at_least_1ms() {
+        let c = MonitorConfig::default().with_poll_interval(0);
+        assert_eq!(c.poll_interval, Duration::from_millis(1));
+    }
+
+    #[test]
+    fn target_duration_tolerance_clamped_to_non_negative() {
+        let c = MonitorConfig::default().with_target_duration_tolerance(-1.0);
+        assert_eq!(c.target_duration_tolerance, 0.0);
+    }
+
+    #[test]
+    fn mseq_gap_threshold_clamped_to_at_least_1() {
+        let c = MonitorConfig::default().with_mseq_gap_threshold(0);
+        assert_eq!(c.mseq_gap_threshold, 1);
+    }
+
+    #[test]
+    fn segment_duration_anomaly_ratio_clamped_to_unit_range() {
+        let c = MonitorConfig::default().with_segment_duration_anomaly_ratio(-0.5);
+        assert_eq!(c.segment_duration_anomaly_ratio, 0.0);
+
+        let c = MonitorConfig::default().with_segment_duration_anomaly_ratio(1.5);
+        assert_eq!(c.segment_duration_anomaly_ratio, 1.0);
+    }
+
+    #[test]
+    fn max_concurrent_fetches_clamped_to_at_least_1() {
+        let c = MonitorConfig::default().with_max_concurrent_fetches(0);
+        assert_eq!(c.max_concurrent_fetches, 1);
+    }
+
+    #[test]
+    fn valid_values_pass_through() {
+        let c = MonitorConfig::default()
+            .with_poll_interval(500)
+            .with_target_duration_tolerance(1.0)
+            .with_mseq_gap_threshold(10)
+            .with_segment_duration_anomaly_ratio(0.3)
+            .with_max_concurrent_fetches(8);
+
+        assert_eq!(c.poll_interval, Duration::from_millis(500));
+        assert_eq!(c.target_duration_tolerance, 1.0);
+        assert_eq!(c.mseq_gap_threshold, 10);
+        assert_eq!(c.segment_duration_anomaly_ratio, 0.3);
+        assert_eq!(c.max_concurrent_fetches, 8);
     }
 }

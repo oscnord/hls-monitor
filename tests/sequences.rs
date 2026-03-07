@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hls_core::{ErrorType, EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
+use hls_monitor::{ErrorType, EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
 
 const MASTER_URL: &str = "https://mock.mock.com/channels/1xx/master.m3u8";
 const LEVEL0_URL: &str = "https://mock.mock.com/channels/1xx/level_0.m3u8";
@@ -123,7 +123,7 @@ async fn run_sequence(
     level0_steps: Vec<String>,
     level1_steps: Vec<String>,
     num_polls: usize,
-) -> Vec<hls_core::MonitorError> {
+) -> Vec<hls_monitor::MonitorError> {
     let step = Arc::new(AtomicUsize::new(0));
 
     let mut responses = HashMap::new();
@@ -156,7 +156,7 @@ async fn run_sequence_with_events(
     level0_steps: Vec<String>,
     level1_steps: Vec<String>,
     num_polls: usize,
-) -> (Vec<hls_core::MonitorError>, Vec<MonitorEvent>) {
+) -> (Vec<hls_monitor::MonitorError>, Vec<MonitorEvent>) {
     let step = Arc::new(AtomicUsize::new(0));
 
     let mut responses = HashMap::new();
@@ -189,7 +189,7 @@ async fn run_sequence_scte35_with_events(
     level0_steps: Vec<String>,
     level1_steps: Vec<String>,
     num_polls: usize,
-) -> (Vec<hls_core::MonitorError>, Vec<MonitorEvent>) {
+) -> (Vec<hls_monitor::MonitorError>, Vec<MonitorEvent>) {
     let step = Arc::new(AtomicUsize::new(0));
 
     let mut responses = HashMap::new();
@@ -218,7 +218,7 @@ async fn run_sequence_scte35_with_events(
     (monitor.get_errors().await, monitor.get_events().await)
 }
 
-fn assert_any_error_contains(errors: &[hls_core::MonitorError], needle: &str) {
+fn assert_any_error_contains(errors: &[hls_monitor::MonitorError], needle: &str) {
     assert!(
         errors.iter().any(|e| e.details.contains(needle)),
         "Expected at least one error containing '{}', but got:\n{:#?}",

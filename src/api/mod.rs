@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 pub mod app;
 pub mod error;
 pub mod metrics;
@@ -9,8 +7,8 @@ pub mod state;
 use std::future::Future;
 use std::net::SocketAddr;
 
-use crate::app::build_app;
-use crate::state::AppState;
+use crate::api::app::build_app;
+use crate::api::state::AppState;
 
 pub async fn serve(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     serve_with_state(addr, AppState::new(), shutdown_signal()).await

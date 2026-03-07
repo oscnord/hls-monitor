@@ -1,6 +1,4 @@
-#![forbid(unsafe_code)]
-
-mod config;
+pub(crate) mod app_config;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -11,7 +9,7 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use hls_core::{
+use crate::{
     notification_channel, EventKind, HttpLoader, Monitor, MonitorConfig, MonitorError, StreamItem,
     WebhookDispatcher,
 };
@@ -145,8 +143,7 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() {
+pub async fn run() {
     let cli = Cli::parse();
 
     match cli.command {
@@ -234,7 +231,7 @@ fn print_errors_styled(errors: &[MonitorError]) {
 
 async fn run_serve(listen_override: Option<SocketAddr>, config_path: Option<PathBuf>) {
     let app_config = if let Some(ref path) = config_path {
-        match config::AppConfig::load(path) {
+        match app_config::AppConfig::load(path) {
             Ok(c) => {
                 init_tracing(&c.server.log_format);
                 tracing::info!(path = %path.display(), "Loaded config file");
@@ -267,9 +264,15 @@ async fn run_serve(listen_override: Option<SocketAddr>, config_path: Option<Path
 
     let (notification_tx, notification_rx) = notification_channel();
 
-    let state = hls_api::state::AppState::new()
+    let allowed_origins = app_config
+        .as_ref()
+        .map(|c| c.server.allowed_origins.clone())
+        .unwrap_or_default();
+
+    let state = crate::api::state::AppState::new()
         .with_default_config(default_config.clone())
-        .with_notification_tx(notification_tx.clone());
+        .with_notification_tx(notification_tx.clone())
+        .with_allowed_origins(allowed_origins);
 
     let shared_client = HttpLoader::build_client(default_config.request_timeout);
 
@@ -313,7 +316,7 @@ async fn run_serve(listen_override: Option<SocketAddr>, config_path: Option<Path
     let monitors = state.monitors.clone();
 
     tracing::info!(%listen, "Starting HLS Monitor API server");
-    if let Err(e) = hls_api::serve_with_state(listen, state, hls_api::shutdown_signal()).await {
+    if let Err(e) = crate::api::serve_with_state(listen, state, crate::api::shutdown_signal()).await {
         tracing::error!(error = %e, "Server failed");
         std::process::exit(1);
     }
@@ -358,7 +361,7 @@ async fn run_watch(
 
     let notification_tx = if let Some(ref wh_url) = webhook_url {
         let (tx, rx) = notification_channel();
-        let wh_config = hls_core::WebhookConfig {
+        let wh_config = crate::WebhookConfig {
             url: wh_url.clone(),
             events: vec![],
             timeout_ms: 5000,
@@ -419,7 +422,10 @@ async fn run_watch(
         .ok();
     multi.println("").ok();
 
-    monitor.start().await.expect("Failed to start monitor");
+    if let Err(e) = monitor.start().await {
+        eprintln!("{} {}", style("Error:").red().bold(), e);
+        std::process::exit(1);
+    }
 
     let status_bar = multi.add(ProgressBar::new_spinner().with_style(msg_style.clone()));
     status_bar.set_message(format!(
@@ -432,7 +438,7 @@ async fn run_watch(
     let mut last_event_count = 0usize;
     let mut poll_num = 0u64;
 
-    let shutdown = hls_api::shutdown_signal();
+    let shutdown = crate::api::shutdown_signal();
     tokio::pin!(shutdown);
 
     loop {
