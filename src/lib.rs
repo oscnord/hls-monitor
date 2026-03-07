@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod api;
+pub mod cli;
 pub mod config;
 pub mod loader;
 pub mod monitor;

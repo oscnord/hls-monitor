@@ -8,12 +8,12 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use hls_core::{HttpLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem, StreamStatus};
+use crate::{HttpLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem, StreamStatus};
 
 const MAX_STREAMS_PER_MONITOR: usize = 100;
 
-use crate::error::ApiError;
-use crate::state::AppState;
+use crate::api::error::ApiError;
+use crate::api::state::AppState;
 
 /// A stream input: either a bare URL string or `{ id, url }` object.
 #[derive(Debug, Clone, Deserialize)]
@@ -119,7 +119,7 @@ pub struct RemoveStreamResponse {
 pub struct ErrorsResponse {
     pub last_checked: Option<String>,
     pub state: String,
-    pub errors: Vec<hls_core::MonitorError>,
+    pub errors: Vec<crate::MonitorError>,
 }
 
 #[derive(Serialize)]

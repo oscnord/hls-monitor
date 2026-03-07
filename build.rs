@@ -11,5 +11,5 @@ fn main() {
         .unwrap_or_default();
 
     println!("cargo:rustc-env=GIT_HASH={}", hash);
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/HEAD");
 }

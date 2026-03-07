@@ -4,9 +4,9 @@ use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::metrics::metrics_handler;
-use crate::routes;
-use crate::state::AppState;
+use crate::api::metrics::metrics_handler;
+use crate::api::routes;
+use crate::api::state::AppState;
 
 fn build_cors_layer(allowed_origins: &[String]) -> CorsLayer {
     if allowed_origins.is_empty() {

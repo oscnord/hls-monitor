@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use hls_core::{Monitor, MonitorConfig, Notification};
+use crate::{Monitor, MonitorConfig, Notification};
 
 #[derive(Clone)]
 pub struct AppState {

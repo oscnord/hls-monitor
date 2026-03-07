@@ -5,9 +5,9 @@ use axum::extract::State;
 use axum::http::header;
 use axum::response::IntoResponse;
 
-use hls_core::ErrorType;
+use crate::ErrorType;
 
-use crate::state::AppState;
+use crate::api::state::AppState;
 
 fn escape_label_value(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

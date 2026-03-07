@@ -30,7 +30,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use hls_core::{MonitorConfig, StreamItem, WebhookConfig};
+use crate::{MonitorConfig, StreamItem, WebhookConfig};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
