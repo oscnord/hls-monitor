@@ -267,9 +267,15 @@ async fn run_serve(listen_override: Option<SocketAddr>, config_path: Option<Path
 
     let (notification_tx, notification_rx) = notification_channel();
 
+    let allowed_origins = app_config
+        .as_ref()
+        .map(|c| c.server.allowed_origins.clone())
+        .unwrap_or_default();
+
     let state = hls_api::state::AppState::new()
         .with_default_config(default_config.clone())
-        .with_notification_tx(notification_tx.clone());
+        .with_notification_tx(notification_tx.clone())
+        .with_allowed_origins(allowed_origins);
 
     let shared_client = HttpLoader::build_client(default_config.request_timeout);
 
@@ -419,7 +425,10 @@ async fn run_watch(
         .ok();
     multi.println("").ok();
 
-    monitor.start().await.expect("Failed to start monitor");
+    if let Err(e) = monitor.start().await {
+        eprintln!("{} {}", style("Error:").red().bold(), e);
+        std::process::exit(1);
+    }
 
     let status_bar = multi.add(ProgressBar::new_spinner().with_style(msg_style.clone()));
     status_bar.set_message(format!(

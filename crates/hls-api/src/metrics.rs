@@ -9,6 +9,19 @@ use hls_core::ErrorType;
 
 use crate::state::AppState;
 
+fn escape_label_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     let mut out = String::with_capacity(4096);
 
@@ -83,7 +96,7 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
             writeln!(
                 out,
                 "hls_monitor_current_errors{{monitor_id=\"{}\",error_type=\"{}\",media_type=\"{}\",stream_id=\"{}\"}} {}",
-                id, et, mt, sid, count
+                id, escape_label_value(et), escape_label_value(mt), escape_label_value(sid), count
             ).unwrap();
         }
     }
@@ -130,7 +143,7 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
             writeln!(
                 out,
                 "hls_monitor_stream_total_errors{{monitor_id=\"{}\",stream_id=\"{}\"}} {}",
-                id, stream_id, count
+                id, escape_label_value(stream_id), count
             )
             .unwrap();
         }
@@ -153,7 +166,7 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
             writeln!(
                 out,
                 "hls_monitor_stream_time_since_last_error_seconds{{monitor_id=\"{}\",stream_id=\"{}\",last_error_time=\"{}\"}} {:.3}",
-                id, stream_id, t.to_rfc3339(), since
+                id, escape_label_value(stream_id), t.to_rfc3339(), since
             ).unwrap();
         }
     }
@@ -194,7 +207,7 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
             writeln!(
                 out,
                 "hls_monitor_manifest_error_types{{monitor_id=\"{}\",media_type=\"{}\"}} {}",
-                id, mt, count
+                id, escape_label_value(mt), count
             )
             .unwrap();
         }
@@ -209,4 +222,27 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
         )],
         out,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_label_value_handles_special_chars() {
+        assert_eq!(escape_label_value(r#"hello"world"#), r#"hello\"world"#);
+        assert_eq!(escape_label_value("back\\slash"), "back\\\\slash");
+        assert_eq!(escape_label_value("line\nbreak"), "line\\nbreak");
+        assert_eq!(
+            escape_label_value(r#"a"b\c"#),
+            r#"a\"b\\c"#
+        );
+    }
+
+    #[test]
+    fn escape_label_value_passes_through_clean_strings() {
+        assert_eq!(escape_label_value("stream_1"), "stream_1");
+        assert_eq!(escape_label_value("video"), "video");
+        assert_eq!(escape_label_value(""), "");
+    }
 }

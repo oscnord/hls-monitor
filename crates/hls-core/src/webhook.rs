@@ -20,6 +20,7 @@ use crate::monitor::event::{EventKind, MonitorEvent};
 
 /// Configuration for a single webhook endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WebhookConfig {
     /// The URL to POST payloads to.
     pub url: String,

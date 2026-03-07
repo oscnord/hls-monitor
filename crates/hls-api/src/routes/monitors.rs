@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use hls_core::{HttpLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem, StreamStatus};
+
+const MAX_STREAMS_PER_MONITOR: usize = 100;
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -44,6 +46,7 @@ impl StreamInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateMonitorRequest {
     pub streams: Vec<StreamInput>,
     pub stale_limit: Option<u64>,
@@ -95,6 +98,7 @@ pub struct StreamsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddStreamsRequest {
     pub streams: Vec<StreamInput>,
 }
@@ -149,6 +153,12 @@ pub struct EventsResponse {
     pub events: Vec<MonitorEvent>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/monitors", post(create_monitor).get(list_monitors).delete(delete_all_monitors))
@@ -196,6 +206,13 @@ async fn create_monitor(
 ) -> Result<impl IntoResponse, ApiError> {
     if body.streams.is_empty() {
         return Err(ApiError::BadRequest("streams array must not be empty".into()));
+    }
+    if body.streams.len() > MAX_STREAMS_PER_MONITOR {
+        return Err(ApiError::BadRequest(format!(
+            "Too many streams ({}), maximum is {}",
+            body.streams.len(),
+            MAX_STREAMS_PER_MONITOR
+        )));
     }
 
     let invalid: Vec<&str> = body.streams.iter().map(|s| s.url()).filter(|u| !is_valid_url(u)).collect();
@@ -271,9 +288,15 @@ async fn create_monitor(
 }
 
 /// GET /api/v1/monitors
-async fn list_monitors(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_monitors(
+    State(state): State<AppState>,
+    Query(query): Query<ListQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = query.offset.unwrap_or(0);
+
     let mut summaries = Vec::new();
-    for entry in state.monitors.iter() {
+    for entry in state.monitors.iter().skip(offset).take(limit) {
         let m = entry.value();
         summaries.push(MonitorSummary {
             id: m.id(),
