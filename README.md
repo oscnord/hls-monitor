@@ -38,7 +38,7 @@ Real-time HLS stream monitor that detects playlist anomalies across one or more 
 ## Install
 
 ```
-cargo install --path crates/hls-cli
+cargo install --path .
 ```
 
 This installs the `hls-monitor` binary to `~/.cargo/bin/`.
@@ -184,11 +184,11 @@ Webhooks deliver JSON payloads via POST on errors and events. Each `[[webhook]]`
 
 ## Project structure
 
-| Crate      | Description                                        |
-| ---------- | -------------------------------------------------- |
-| `hls-core` | Library — monitors, checks, webhooks               |
-| `hls-api`  | HTTP server — Axum routes, metrics                 |
-| `hls-cli`  | CLI binary — `serve`, `watch`, and `validate` commands |
+| Module         | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| `src/monitor/` | Core engine — checks, state, events                  |
+| `src/api/`     | HTTP server — Axum routes, metrics                   |
+| `src/cli/`     | CLI entry — `serve`, `watch`, and `validate` commands |
 
 ## Building
 
