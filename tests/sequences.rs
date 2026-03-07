@@ -593,14 +593,14 @@ fn count_events(events: &[MonitorEvent], kind: EventKind) -> usize {
 #[tokio::test]
 async fn test_events_manifest_updated() {
     let level0 = vec![
-        mp(0, None, &[s("a0.ts"), s("a1.ts")]),
-        mp(1, None, &[s("a1.ts"), s("a2.ts")]),
-        mp(2, None, &[s("a2.ts"), s("a3.ts")]),
+        mp(0, None, &[s("a0.ts"), s("a1.ts"), s("a2.ts")]),
+        mp(1, None, &[s("a1.ts"), s("a2.ts"), s("a3.ts")]),
+        mp(2, None, &[s("a2.ts"), s("a3.ts"), s("a4.ts")]),
     ];
     let level1 = vec![
-        mp(0, None, &[s("b0.ts"), s("b1.ts")]),
-        mp(1, None, &[s("b1.ts"), s("b2.ts")]),
-        mp(2, None, &[s("b2.ts"), s("b3.ts")]),
+        mp(0, None, &[s("b0.ts"), s("b1.ts"), s("b2.ts")]),
+        mp(1, None, &[s("b1.ts"), s("b2.ts"), s("b3.ts")]),
+        mp(2, None, &[s("b2.ts"), s("b3.ts"), s("b4.ts")]),
     ];
 
     let (errors, events) = run_sequence_with_events(level0, level1, 3).await;

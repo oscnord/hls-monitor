@@ -59,6 +59,8 @@ pub struct CreateMonitorRequest {
     pub variant_failure_threshold: Option<u32>,
     pub segment_duration_anomaly_ratio: Option<f64>,
     pub max_concurrent_fetches: Option<usize>,
+    #[serde(default)]
+    pub spec_stale: bool,
 }
 
 #[derive(Serialize)]
@@ -256,6 +258,9 @@ async fn create_monitor(
         }
         if let Some(v) = body.max_concurrent_fetches {
             c = c.with_max_concurrent_fetches(v);
+        }
+        if body.spec_stale {
+            c = c.with_spec_stale(true);
         }
         c
     };

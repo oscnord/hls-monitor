@@ -114,6 +114,9 @@ pub struct DefaultsConfig {
 
     #[serde(default)]
     pub max_concurrent_fetches: Option<usize>,
+
+    #[serde(default)]
+    pub spec_stale: bool,
 }
 
 impl Default for DefaultsConfig {
@@ -130,6 +133,7 @@ impl Default for DefaultsConfig {
             variant_failure_threshold: None,
             segment_duration_anomaly_ratio: None,
             max_concurrent_fetches: None,
+            spec_stale: false,
         }
     }
 }
@@ -174,6 +178,9 @@ impl DefaultsConfig {
         if let Some(v) = self.max_concurrent_fetches {
             c = c.with_max_concurrent_fetches(v);
         }
+        if self.spec_stale {
+            c = c.with_spec_stale(true);
+        }
         c
     }
 }
@@ -191,6 +198,7 @@ pub struct MonitorDef {
     pub variant_failure_threshold: Option<u32>,
     pub segment_duration_anomaly_ratio: Option<f64>,
     pub max_concurrent_fetches: Option<usize>,
+    pub spec_stale: Option<bool>,
 
     #[serde(default)]
     pub streams: Vec<StreamDef>,
@@ -232,6 +240,9 @@ impl MonitorDef {
         }
         if let Some(v) = self.max_concurrent_fetches {
             c = c.with_max_concurrent_fetches(v);
+        }
+        if let Some(v) = self.spec_stale {
+            c = c.with_spec_stale(v);
         }
         c
     }

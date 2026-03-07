@@ -67,6 +67,10 @@ struct CheckArgs {
     /// Max concurrent variant playlist fetches [default: 4].
     #[arg(long)]
     max_concurrent_fetches: Option<usize>,
+
+    /// Use spec-compliant stale timing (1.5× target duration).
+    #[arg(long, default_value_t = false)]
+    spec_stale: bool,
 }
 
 impl CheckArgs {
@@ -93,6 +97,7 @@ impl CheckArgs {
         if let Some(v) = self.max_concurrent_fetches {
             config = config.with_max_concurrent_fetches(v);
         }
+        config = config.with_spec_stale(self.spec_stale);
         config
     }
 }

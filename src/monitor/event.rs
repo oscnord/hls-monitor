@@ -14,6 +14,7 @@ pub enum EventKind {
     DiscontinuityChanged,
     ManifestUpdated,
     StaleRecovered,
+    StreamEnded,
 }
 
 impl fmt::Display for EventKind {
@@ -25,6 +26,7 @@ impl fmt::Display for EventKind {
             Self::DiscontinuityChanged => write!(f, "DISC"),
             Self::ManifestUpdated => write!(f, "UPDATE"),
             Self::StaleRecovered => write!(f, "RECOVERED"),
+            Self::StreamEnded => write!(f, "ENDED"),
         }
     }
 }

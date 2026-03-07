@@ -80,6 +80,9 @@ mod tests {
             in_cue_out: false,
             cue_out_duration: None,
             version: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            has_endlist: false,
         }
     }
 
@@ -109,6 +112,13 @@ mod tests {
             playlist_type: None,
             version: None,
             has_gaps: false,
+            has_endlist: false,
+            i_frames_only: false,
+            has_byte_range: false,
+            has_map: false,
+            has_key_iv: false,
+            has_key_format: false,
+            keys: vec![],
         }
     }
 

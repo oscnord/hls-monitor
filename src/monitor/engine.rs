@@ -419,6 +419,7 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
         end_date: dr.end_date,
         duration: dr.duration,
         end_on_next: dr.end_on_next,
+        planned_duration: dr.planned_duration,
     });
 
     SegmentSnapshot {
@@ -449,6 +450,26 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
     let has_cue_out = cue_out_count > 0;
     let has_gaps = segments.iter().any(|s| s.gap);
 
+    let mut keys = Vec::new();
+    let mut seen_keys = std::collections::HashSet::new();
+    for seg in &pl.segments {
+        if let Some(ref key) = seg.key {
+            let method = key.method.to_string();
+            let has_uri = key.uri.is_some();
+            let has_iv = key.iv.is_some();
+            let has_keyformat = key.keyformat.is_some();
+            let sig = format!("{}:{}:{}:{}", method, has_uri, has_iv, has_keyformat);
+            if seen_keys.insert(sig) {
+                keys.push(KeySnapshot {
+                    method: method.clone(),
+                    has_uri,
+                    has_iv,
+                    has_keyformat,
+                });
+            }
+        }
+    }
+
     PlaylistSnapshot {
         media_sequence: pl.media_sequence,
         discontinuity_sequence: pl.discontinuity_sequence,
@@ -462,6 +483,13 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
         version: pl.version.and_then(|v| u16::try_from(v).ok()),
         playlist_type: pl.playlist_type.as_ref().map(|pt| pt.to_string()),
         has_gaps,
+        has_endlist: pl.end_list,
+        i_frames_only: pl.i_frames_only,
+        has_byte_range: pl.segments.iter().any(|s| s.byte_range.is_some()),
+        has_map: pl.segments.iter().any(|s| s.map.is_some()),
+        has_key_iv: pl.segments.iter().any(|s| s.key.as_ref().is_some_and(|k| k.iv.is_some())),
+        has_key_format: pl.segments.iter().any(|s| s.key.as_ref().is_some_and(|k| k.keyformat.is_some())),
+        keys,
     }
 }
 
@@ -477,6 +505,60 @@ fn media_key(media: &m3u8_rs::AlternativeMedia) -> String {
     let group = &media.group_id;
     let lang = media.language.as_deref().unwrap_or(&media.name);
     format!("{};{}", group, lang)
+}
+
+fn validate_master(
+    master: &m3u8_rs::MasterPlaylist,
+    stream_url: &str,
+    stream_id: &str,
+) -> Vec<MonitorError> {
+    let mut errors = Vec::new();
+
+    let mut groups: HashMap<(String, String), Vec<&m3u8_rs::AlternativeMedia>> = HashMap::new();
+    for media in &master.alternatives {
+        let key = (media.media_type.to_string(), media.group_id.clone());
+        groups.entry(key).or_default().push(media);
+    }
+
+    for ((media_type, group_id), members) in &groups {
+        let mut names = std::collections::HashSet::new();
+        let mut default_count = 0u32;
+
+        for member in members {
+            if !names.insert(&member.name) {
+                errors.push(MonitorError::new(
+                    ErrorType::RenditionGroupViolation,
+                    media_type.as_str(),
+                    group_id.as_str(),
+                    format!(
+                        "Rendition group '{}' has duplicate NAME '{}'",
+                        group_id, member.name
+                    ),
+                    stream_url,
+                    stream_id,
+                ));
+            }
+            if member.default {
+                default_count += 1;
+            }
+        }
+
+        if default_count > 1 {
+            errors.push(MonitorError::new(
+                ErrorType::RenditionGroupViolation,
+                media_type.as_str(),
+                group_id.as_str(),
+                format!(
+                    "Rendition group '{}' has {} members with DEFAULT=YES (max 1 allowed)",
+                    group_id, default_count
+                ),
+                stream_url,
+                stream_id,
+            ));
+        }
+    }
+
+    errors
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -542,6 +624,19 @@ async fn poll_stream(
             return all_errors;
         }
     };
+
+    {
+        let master_errors = validate_master(&master, &stream.url, &stream.id);
+        if !master_errors.is_empty() {
+            let mut data = stream_data.write().await;
+            let sd = data
+                .entry(base_url.clone())
+                .or_insert_with(|| StreamData::new(config.error_limit, config.event_limit));
+            for e in master_errors {
+                record_error(sd, &mut all_errors, notification_tx, monitor_id, e);
+            }
+        }
+    }
 
     let mut variant_targets: Vec<(String, String, String)> = Vec::new();
 
@@ -694,6 +789,9 @@ async fn poll_stream(
                     in_cue_out: new_in_cue_out,
                     cue_out_duration: snapshot.cue_out_duration,
                     version: snapshot.version,
+                    target_duration: snapshot.target_duration,
+                    playlist_type: snapshot.playlist_type.clone(),
+                    has_endlist: snapshot.has_endlist,
                 };
                 sd.variants.insert(variant_key_str.clone(), new_state);
 
@@ -795,6 +893,9 @@ async fn poll_stream(
                     in_cue_out: has_cue_out && !has_cue_in,
                     cue_out_duration: snapshot.cue_out_duration,
                     version: snapshot.version,
+                    target_duration: snapshot.target_duration,
+                    playlist_type: snapshot.playlist_type.clone(),
+                    has_endlist: snapshot.has_endlist,
                 };
                 sd.variants.insert(variant_key_str.clone(), initial_state);
             }
@@ -816,12 +917,25 @@ async fn poll_stream(
         }
         sd.last_fetch = Utc::now();
 
+        let effective_stale_limit = if config.spec_stale {
+            let max_td = sd.variants.values()
+                .map(|v| v.target_duration)
+                .fold(0.0_f64, f64::max);
+            if max_td > 0.0 {
+                std::time::Duration::from_millis((max_td * 1500.0) as u64)
+            } else {
+                config.stale_limit
+            }
+        } else {
+            config.stale_limit
+        };
+
         let time_since_change = (Utc::now() - sd.last_content_change)
             .num_milliseconds()
             .max(0) as u128;
         let is_stale = check_stale(
             time_since_change,
-            config.stale_limit,
+            effective_stale_limit,
             &stream.url,
             &stream.id,
         );
