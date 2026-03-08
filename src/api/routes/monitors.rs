@@ -72,6 +72,8 @@ pub struct CreateMonitorResponse {
     pub stale_limit_ms: u64,
     pub poll_interval_ms: u64,
     pub scte35: bool,
+    pub spec_stale: bool,
+    pub authoring_spec: bool,
 }
 
 #[derive(Serialize)]
@@ -93,6 +95,8 @@ pub struct MonitorDetail {
     pub stale_limit_ms: u64,
     pub poll_interval_ms: u64,
     pub scte35: bool,
+    pub spec_stale: bool,
+    pub authoring_spec: bool,
     pub error_count: usize,
 }
 
@@ -292,6 +296,8 @@ async fn create_monitor(
         stale_limit_ms,
         poll_interval_ms,
         scte35: body.scte35,
+        spec_stale: body.spec_stale,
+        authoring_spec: body.authoring_spec,
     };
 
     Ok((StatusCode::CREATED, Json(resp)))
@@ -336,6 +342,8 @@ async fn get_monitor(
         stale_limit_ms: m.config().stale_limit.as_millis() as u64,
         poll_interval_ms: m.config().poll_interval.as_millis() as u64,
         scte35: m.config().scte35_enabled,
+        spec_stale: m.config().spec_stale,
+        authoring_spec: m.config().authoring_spec,
         error_count: m.get_errors().await.len(),
     };
 
