@@ -5,6 +5,13 @@ pub use http::HttpLoader;
 use async_trait::async_trait;
 use thiserror::Error;
 
+#[derive(Debug, Clone)]
+pub struct LoadResponse {
+    pub body: String,
+    pub content_type: Option<String>,
+    pub content_encoding: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum LoadError {
     #[error("HTTP error {status} fetching {url}: {message}")]
@@ -50,5 +57,5 @@ impl LoadError {
 /// The trait is object-safe and Send + Sync for use across async tasks.
 #[async_trait]
 pub trait ManifestLoader: Send + Sync {
-    async fn load(&self, uri: &str) -> Result<String, LoadError>;
+    async fn load(&self, uri: &str) -> Result<LoadResponse, LoadError>;
 }

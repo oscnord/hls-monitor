@@ -71,6 +71,10 @@ struct CheckArgs {
     /// Use spec-compliant stale timing (1.5× target duration).
     #[arg(long, default_value_t = false)]
     spec_stale: bool,
+
+    /// Enable Apple HLS Authoring Specification checks.
+    #[arg(long, default_value_t = false)]
+    authoring_spec: bool,
 }
 
 impl CheckArgs {
@@ -98,6 +102,7 @@ impl CheckArgs {
             config = config.with_max_concurrent_fetches(v);
         }
         config = config.with_spec_stale(self.spec_stale);
+        config = config.with_authoring_spec(self.authoring_spec);
         config
     }
 }

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use tracing::{debug, warn};
 
-use super::{LoadError, ManifestLoader};
+use super::{LoadError, LoadResponse, ManifestLoader};
 
 /// HTTP-based manifest loader with connection pooling, retries, and backoff.
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl Default for HttpLoader {
 
 #[async_trait]
 impl ManifestLoader for HttpLoader {
-    async fn load(&self, uri: &str) -> Result<String, LoadError> {
+    async fn load(&self, uri: &str) -> Result<LoadResponse, LoadError> {
         let mut last_error = None;
 
         for attempt in 0..=self.max_retries {
@@ -78,8 +78,18 @@ impl ManifestLoader for HttpLoader {
             match self.client.get(uri).send().await {
                 Ok(response) => {
                     if response.status().is_success() {
+                        let content_type = response
+                            .headers()
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
+                        let content_encoding = response
+                            .headers()
+                            .get(reqwest::header::CONTENT_ENCODING)
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
                         match response.text().await {
-                            Ok(body) => return Ok(body),
+                            Ok(body) => return Ok(LoadResponse { body, content_type, content_encoding }),
                             Err(e) => {
                                 last_error = Some(LoadError::Network {
                                     url: uri.to_string(),
@@ -148,7 +158,7 @@ mod tests {
         let loader = HttpLoader::new(Duration::from_secs(5), 0, Duration::from_millis(10));
         let result = loader.load(&format!("{}/test.m3u8", server.uri())).await;
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("#EXTM3U"));
+        assert!(result.unwrap().body.contains("#EXTM3U"));
     }
 
     #[tokio::test]
@@ -188,7 +198,7 @@ mod tests {
         let loader = HttpLoader::new(Duration::from_secs(5), 3, Duration::from_millis(10));
         let result = loader.load(&format!("{}/retry.m3u8", server.uri())).await;
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("OK"));
+        assert!(result.unwrap().body.contains("OK"));
     }
 
     #[tokio::test]
@@ -204,5 +214,23 @@ mod tests {
         let result = loader.load(&format!("{}/fail.m3u8", server.uri())).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().is_last_retry());
+    }
+
+    #[tokio::test]
+    async fn load_captures_content_type_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/typed.m3u8"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw("#EXTM3U\n#EXT-X-VERSION:3", "application/vnd.apple.mpegurl"),
+            )
+            .mount(&server)
+            .await;
+
+        let loader = HttpLoader::new(Duration::from_secs(5), 0, Duration::from_millis(10));
+        let resp = loader.load(&format!("{}/typed.m3u8", server.uri())).await.unwrap();
+        assert_eq!(resp.content_type.as_deref(), Some("application/vnd.apple.mpegurl"));
+        assert!(resp.body.contains("#EXTM3U"));
     }
 }

@@ -28,6 +28,7 @@ pub struct MonitorConfig {
     pub segment_duration_anomaly_ratio: f64,
     pub max_concurrent_fetches: usize,
     pub spec_stale: bool,
+    pub authoring_spec: bool,
 }
 
 impl Default for MonitorConfig {
@@ -49,6 +50,7 @@ impl Default for MonitorConfig {
             segment_duration_anomaly_ratio: 0.5,
             max_concurrent_fetches: 4,
             spec_stale: false,
+            authoring_spec: false,
         }
     }
 }
@@ -118,6 +120,11 @@ impl MonitorConfig {
 
     pub fn with_spec_stale(mut self, enabled: bool) -> Self {
         self.spec_stale = enabled;
+        self
+    }
+
+    pub fn with_authoring_spec(mut self, enabled: bool) -> Self {
+        self.authoring_spec = enabled;
         self
     }
 }

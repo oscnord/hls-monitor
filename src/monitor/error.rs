@@ -35,6 +35,7 @@ pub enum ErrorType {
     VersionCompatibility,
     EncryptionViolation,
     RenditionGroupViolation,
+    AuthoringSpecViolation,
 }
 
 impl fmt::Display for ErrorType {
@@ -67,6 +68,7 @@ impl fmt::Display for ErrorType {
             Self::VersionCompatibility => write!(f, "Version Compatibility"),
             Self::EncryptionViolation => write!(f, "Encryption Violation"),
             Self::RenditionGroupViolation => write!(f, "Rendition Group Violation"),
+            Self::AuthoringSpecViolation => write!(f, "Authoring Spec Violation"),
         }
     }
 }

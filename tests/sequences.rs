@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hls_monitor::{ErrorType, EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
+use hls_monitor::{ErrorType, EventKind, LoadError, LoadResponse, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
 
 const MASTER_URL: &str = "https://mock.mock.com/channels/1xx/master.m3u8";
 const LEVEL0_URL: &str = "https://mock.mock.com/channels/1xx/level_0.m3u8";
@@ -108,14 +108,18 @@ struct SequenceLoader {
 
 #[async_trait]
 impl ManifestLoader for SequenceLoader {
-    async fn load(&self, uri: &str) -> Result<String, LoadError> {
+    async fn load(&self, uri: &str) -> Result<LoadResponse, LoadError> {
         let responses = self
             .responses
             .get(uri)
             .unwrap_or_else(|| panic!("SequenceLoader: unexpected URL: {}", uri));
         let step = self.step.load(Ordering::SeqCst);
         let idx = step.min(responses.len() - 1);
-        Ok(responses[idx].clone())
+        Ok(LoadResponse {
+            body: responses[idx].clone(),
+            content_type: None,
+            content_encoding: None,
+        })
     }
 }
 

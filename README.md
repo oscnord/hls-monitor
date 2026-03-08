@@ -44,6 +44,12 @@ Real-time HLS stream monitor that detects playlist anomalies across one or more 
 - **Stale manifests** — playlists that stop updating beyond a configurable threshold (optional spec-compliant 1.5× target duration mode)
 - **SCTE-35 / CUE marker issues** — orphaned CUE-IN/CUE-OUT tags, missing continuations (opt-in)
 
+**Authoring spec (opt-in)**
+- **Missing AVERAGE-BANDWIDTH** — variant streams should declare `AVERAGE-BANDWIDTH` attribute
+- **Missing INDEPENDENT-SEGMENTS** — master playlist should include `EXT-X-INDEPENDENT-SEGMENTS`
+- **No cellular variant** — at least one variant should have BANDWIDTH ≤ 192 kb/s
+- **Invalid Content-Type** — playlists should use `application/vnd.apple.mpegurl` MIME type
+
 ## Install
 
 ```
@@ -108,6 +114,7 @@ All check thresholds are configurable via CLI flags, TOML config, or the API:
 | `--segment-duration-anomaly-ratio` | Min ratio of segment duration to target duration | `0.5` |
 | `--max-concurrent-fetches` | Max concurrent variant playlist fetches | `4` |
 | `--spec-stale` | Use spec-compliant stale timing (1.5× target duration) | `false` |
+| `--authoring-spec` | Enable Apple HLS Authoring Specification checks | `false` |
 
 ## Configuration
 
@@ -131,6 +138,7 @@ See [`config.example.toml`](config.example.toml) for all available options. Copy
 # segment_duration_anomaly_ratio = 0.5
 # max_concurrent_fetches = 4
 # spec_stale = false                 # use 1.5× target duration as stale limit
+# authoring_spec = false                # enable Apple HLS Authoring Spec checks
 
 [[webhook]]
 url = "https://hooks.example.com/hls-alerts"

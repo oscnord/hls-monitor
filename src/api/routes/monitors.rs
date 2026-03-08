@@ -61,6 +61,8 @@ pub struct CreateMonitorRequest {
     pub max_concurrent_fetches: Option<usize>,
     #[serde(default)]
     pub spec_stale: bool,
+    #[serde(default)]
+    pub authoring_spec: bool,
 }
 
 #[derive(Serialize)]
@@ -261,6 +263,9 @@ async fn create_monitor(
         }
         if body.spec_stale {
             c = c.with_spec_stale(true);
+        }
+        if body.authoring_spec {
+            c = c.with_authoring_spec(true);
         }
         c
     };

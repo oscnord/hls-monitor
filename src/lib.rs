@@ -8,7 +8,7 @@ pub mod monitor;
 pub mod webhook;
 
 pub use config::MonitorConfig;
-pub use loader::{HttpLoader, LoadError, ManifestLoader};
+pub use loader::{HttpLoader, LoadError, LoadResponse, ManifestLoader};
 pub use monitor::{
     DateRangeSnapshot, ErrorRing, ErrorType, EventKind, EventRing, Monitor, MonitorError,
     MonitorEvent, MonitorState, StreamItem, StreamStatus, VariantStatus,
