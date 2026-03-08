@@ -189,7 +189,8 @@ curl -X POST http://localhost:8080/api/v1/monitors \
     "streams": ["https://example.com/master.m3u8"],
     "stale_limit": 8000,
     "scte35": true,
-    "max_concurrent_fetches": 4
+    "max_concurrent_fetches": 4,
+    "authoring_spec": true
   }'
 ```
 
