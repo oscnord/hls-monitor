@@ -59,6 +59,10 @@ pub struct CreateMonitorRequest {
     pub variant_failure_threshold: Option<u32>,
     pub segment_duration_anomaly_ratio: Option<f64>,
     pub max_concurrent_fetches: Option<usize>,
+    #[serde(default)]
+    pub spec_stale: bool,
+    #[serde(default)]
+    pub authoring_spec: bool,
 }
 
 #[derive(Serialize)]
@@ -68,6 +72,8 @@ pub struct CreateMonitorResponse {
     pub stale_limit_ms: u64,
     pub poll_interval_ms: u64,
     pub scte35: bool,
+    pub spec_stale: bool,
+    pub authoring_spec: bool,
 }
 
 #[derive(Serialize)]
@@ -89,6 +95,8 @@ pub struct MonitorDetail {
     pub stale_limit_ms: u64,
     pub poll_interval_ms: u64,
     pub scte35: bool,
+    pub spec_stale: bool,
+    pub authoring_spec: bool,
     pub error_count: usize,
 }
 
@@ -257,6 +265,12 @@ async fn create_monitor(
         if let Some(v) = body.max_concurrent_fetches {
             c = c.with_max_concurrent_fetches(v);
         }
+        if body.spec_stale {
+            c = c.with_spec_stale(true);
+        }
+        if body.authoring_spec {
+            c = c.with_authoring_spec(true);
+        }
         c
     };
 
@@ -282,6 +296,8 @@ async fn create_monitor(
         stale_limit_ms,
         poll_interval_ms,
         scte35: body.scte35,
+        spec_stale: body.spec_stale,
+        authoring_spec: body.authoring_spec,
     };
 
     Ok((StatusCode::CREATED, Json(resp)))
@@ -326,6 +342,8 @@ async fn get_monitor(
         stale_limit_ms: m.config().stale_limit.as_millis() as u64,
         poll_interval_ms: m.config().poll_interval.as_millis() as u64,
         scte35: m.config().scte35_enabled,
+        spec_stale: m.config().spec_stale,
+        authoring_spec: m.config().authoring_spec,
         error_count: m.get_errors().await.len(),
     };
 

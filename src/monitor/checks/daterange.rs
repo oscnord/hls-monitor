@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::monitor::error::{ErrorType, MonitorError};
-use crate::monitor::state::{CheckContext, PlaylistSnapshot, VariantState};
+use crate::monitor::state::{CheckContext, DateRangeSnapshot, PlaylistSnapshot, VariantState};
 
 use super::Check;
 
@@ -87,6 +89,64 @@ impl Check for DateRangeCheck {
                     ));
                 }
             }
+
+            if let Some(planned) = dr.planned_duration {
+                if planned < 0.0 {
+                    errors.push(MonitorError::new(
+                        ErrorType::DateRangeViolation,
+                        &ctx.media_type,
+                        &ctx.variant_key,
+                        format!(
+                            "EXT-X-DATERANGE '{}': negative PLANNED-DURATION {:.3}s at index({}) in mseq({})",
+                            dr.id, planned, i, mseq
+                        ),
+                        &ctx.stream_url,
+                        &ctx.stream_id,
+                    ));
+                }
+            }
+        }
+
+        let has_dateranges = curr.segments.iter().any(|s| s.daterange.is_some());
+        let has_pdt = curr.segments.iter().any(|s| s.program_date_time.is_some());
+        if has_dateranges && !has_pdt {
+            errors.push(MonitorError::new(
+                ErrorType::DateRangeViolation,
+                &ctx.media_type,
+                &ctx.variant_key,
+                "Playlist has EXT-X-DATERANGE but no EXT-X-PROGRAM-DATE-TIME".to_string(),
+                &ctx.stream_url,
+                &ctx.stream_id,
+            ));
+        }
+
+        let mut seen_dateranges: HashMap<&str, &DateRangeSnapshot> = HashMap::new();
+        for seg in &curr.segments {
+            if let Some(ref dr) = seg.daterange {
+                if let Some(prev_dr) = seen_dateranges.get(dr.id.as_str()) {
+                    if prev_dr.class != dr.class
+                        || prev_dr.start_date != dr.start_date
+                        || prev_dr.end_date != dr.end_date
+                        || prev_dr.duration != dr.duration
+                        || prev_dr.end_on_next != dr.end_on_next
+                        || prev_dr.planned_duration != dr.planned_duration
+                    {
+                        errors.push(MonitorError::new(
+                            ErrorType::DateRangeViolation,
+                            &ctx.media_type,
+                            &ctx.variant_key,
+                            format!(
+                                "EXT-X-DATERANGE with ID '{}' has conflicting attributes across segments",
+                                dr.id
+                            ),
+                            &ctx.stream_url,
+                            &ctx.stream_id,
+                        ));
+                    }
+                } else {
+                    seen_dateranges.insert(&dr.id, dr);
+                }
+            }
         }
 
         errors
@@ -122,6 +182,9 @@ mod tests {
             in_cue_out: false,
             cue_out_duration: None,
             version: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            has_endlist: false,
         }
     }
 
@@ -144,6 +207,7 @@ mod tests {
             end_date,
             duration,
             end_on_next,
+            planned_duration: None,
         }
     }
 
@@ -176,6 +240,13 @@ mod tests {
             playlist_type: None,
             version: None,
             has_gaps: false,
+            has_endlist: false,
+            i_frames_only: false,
+            has_byte_range: false,
+            has_map: false,
+            has_key_iv: false,
+            has_key_format: false,
+            keys: vec![],
         }
     }
 
@@ -184,7 +255,9 @@ mod tests {
         let check = DateRangeCheck;
         let t0 = base_time();
         let dr = make_daterange("ad-1", Some("ads"), t0, Some(t0 + Duration::seconds(30)), Some(30.0), false);
-        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert!(errors.is_empty());
     }
@@ -194,7 +267,9 @@ mod tests {
         let check = DateRangeCheck;
         let t0 = base_time();
         let dr = make_daterange("ad-1", None, t0, Some(t0 - Duration::seconds(10)), None, false);
-        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].error_type, ErrorType::DateRangeViolation);
@@ -208,7 +283,9 @@ mod tests {
         let check = DateRangeCheck;
         let t0 = base_time();
         let dr = make_daterange("ad-2", None, t0, None, Some(-5.0), false);
-        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].error_type, ErrorType::DateRangeViolation);
@@ -221,7 +298,9 @@ mod tests {
         let check = DateRangeCheck;
         let t0 = base_time();
         let dr = make_daterange("ad-3", None, t0, None, None, true);
-        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].error_type, ErrorType::DateRangeViolation);
@@ -233,7 +312,9 @@ mod tests {
         let check = DateRangeCheck;
         let t0 = base_time();
         let dr = make_daterange("ad-4", Some("ads"), t0, None, Some(30.0), true);
-        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert_eq!(errors.len(), 1);
         assert!(errors[0].details.contains("END-ON-NEXT must not have DURATION or END-DATE"));
@@ -246,6 +327,90 @@ mod tests {
             make_segment("a.ts", None),
             make_segment("b.ts", None),
         ]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn error_negative_planned_duration() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let mut dr = make_daterange("ad-5", None, t0, None, None, false);
+        dr.planned_duration = Some(-5.0);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, ErrorType::DateRangeViolation);
+        assert!(errors[0].details.contains("negative PLANNED-DURATION"));
+        assert!(errors[0].details.contains("-5.000s"));
+    }
+
+    #[test]
+    fn no_error_positive_planned_duration() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let mut dr = make_daterange("ad-6", None, t0, None, None, false);
+        dr.planned_duration = Some(30.0);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(t0);
+        let snap = make_snap(100, vec![seg]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn error_daterange_without_pdt() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let dr = make_daterange("ad-7", None, t0, None, None, false);
+        let snap = make_snap(100, vec![make_segment("a.ts", Some(dr))]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].details.contains("no EXT-X-PROGRAM-DATE-TIME"));
+    }
+
+    #[test]
+    fn no_error_daterange_with_pdt() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let dr = make_daterange("ad-8", None, t0, None, None, false);
+        let mut seg = make_segment("a.ts", Some(dr));
+        seg.program_date_time = Some(base_time());
+        let snap = make_snap(100, vec![seg]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn error_duplicate_id_different_attrs() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let dr1 = make_daterange("dup-1", Some("ads"), t0, None, None, false);
+        let dr2 = make_daterange("dup-1", Some("other"), t0, None, None, false);
+        let mut seg1 = make_segment("a.ts", Some(dr1));
+        seg1.program_date_time = Some(base_time());
+        let mut seg2 = make_segment("b.ts", Some(dr2));
+        seg2.program_date_time = Some(base_time());
+        let snap = make_snap(100, vec![seg1, seg2]);
+        let errors = check.check(&make_prev(), &snap, &ctx());
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].details.contains("conflicting attributes"));
+        assert!(errors[0].details.contains("dup-1"));
+    }
+
+    #[test]
+    fn no_error_duplicate_id_same_attrs() {
+        let check = DateRangeCheck;
+        let t0 = base_time();
+        let dr1 = make_daterange("dup-2", Some("ads"), t0, None, None, false);
+        let dr2 = make_daterange("dup-2", Some("ads"), t0, None, None, false);
+        let mut seg1 = make_segment("a.ts", Some(dr1));
+        seg1.program_date_time = Some(base_time());
+        let mut seg2 = make_segment("b.ts", Some(dr2));
+        seg2.program_date_time = Some(base_time());
+        let snap = make_snap(100, vec![seg1, seg2]);
         let errors = check.check(&make_prev(), &snap, &ctx());
         assert!(errors.is_empty());
     }

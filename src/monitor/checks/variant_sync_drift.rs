@@ -81,6 +81,9 @@ mod tests {
             in_cue_out: false,
             cue_out_duration: None,
             version: None,
+            target_duration: 10.0,
+            playlist_type: None,
+            has_endlist: false,
         }
     }
 

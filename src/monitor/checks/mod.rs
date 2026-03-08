@@ -13,9 +13,17 @@ pub mod segment_duration_anomaly;
 pub mod version;
 pub mod program_date_time;
 pub mod daterange;
+pub mod target_duration_change;
+pub mod min_playlist_duration;
+pub mod endlist;
 pub mod stream_check;
 pub mod variant_sync_drift;
 pub mod variant_availability;
+pub mod variant_target_duration;
+pub mod variant_playlist_type;
+pub mod variant_discontinuity;
+pub mod version_compat;
+pub mod encryption;
 
 use super::error::MonitorError;
 use super::state::{CheckContext, PlaylistSnapshot, VariantState};
@@ -59,6 +67,11 @@ pub fn default_checks(config: &crate::config::MonitorConfig) -> Vec<Box<dyn Chec
     checks.push(Box::new(version::VersionCheck));
     checks.push(Box::new(program_date_time::ProgramDateTimeCheck));
     checks.push(Box::new(daterange::DateRangeCheck));
+    checks.push(Box::new(target_duration_change::TargetDurationChangeCheck));
+    checks.push(Box::new(min_playlist_duration::MinPlaylistDurationCheck));
+    checks.push(Box::new(endlist::EndlistCheck));
+    checks.push(Box::new(version_compat::VersionCompatibilityCheck));
+    checks.push(Box::new(encryption::EncryptionConsistencyCheck));
 
     checks
 }
@@ -67,5 +80,8 @@ pub fn default_stream_checks(config: &crate::config::MonitorConfig) -> Vec<Box<d
     vec![
         Box::new(variant_sync_drift::VariantSyncDriftCheck::new(config.variant_sync_drift_threshold)),
         Box::new(variant_availability::VariantAvailabilityCheck::new(config.variant_failure_threshold)),
+        Box::new(variant_target_duration::VariantTargetDurationConsistencyCheck),
+        Box::new(variant_playlist_type::VariantPlaylistTypeConsistencyCheck),
+        Box::new(variant_discontinuity::VariantDiscontinuityConsistencyCheck),
     ]
 }

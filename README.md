@@ -10,10 +10,15 @@ Real-time HLS stream monitor that detects playlist anomalies across one or more 
 
 **Playlist structure**
 - **Target duration exceeded** — segments longer than `EXT-X-TARGETDURATION` plus tolerance
+- **Target duration change** — `EXT-X-TARGETDURATION` must not change between polls (§6.2.1)
+- **Min playlist duration** — live playlists must hold ≥3× target duration of content (§6.2.2)
 - **Segment duration anomaly** — abnormally short segments relative to target duration
 - **Gap detection** — `EXT-X-GAP` tags in the playlist
 - **Playlist type violation** — VOD/EVENT playlists that mutate unexpectedly
+- **Endlist violation** — VOD playlists missing `EXT-X-ENDLIST` (§4.4.3.5)
 - **Version violation** — `EXT-X-VERSION` changes mid-stream
+- **Version compatibility** — `EXT-X-VERSION` too low for features used (§8)
+- **Encryption violation** — `EXT-X-KEY` method/attribute inconsistencies (§4.4.4.4)
 
 **Sequence tracking**
 - **Media sequence regression** — `EXT-X-MEDIA-SEQUENCE` going backwards
@@ -25,15 +30,25 @@ Real-time HLS stream monitor that detects playlist anomalies across one or more 
 
 **Temporal metadata**
 - **Program date-time jumps** — `EXT-X-PROGRAM-DATE-TIME` discontinuities between segments
-- **DateRange violations** — invalid or inconsistent `EXT-X-DATERANGE` tags
+- **DateRange violations** — invalid or inconsistent `EXT-X-DATERANGE` tags (negative durations, missing `EXT-X-PROGRAM-DATE-TIME`, conflicting duplicate IDs)
 
 **Cross-variant**
 - **Variant sync drift** — media sequence divergence between variants of the same stream
 - **Variant unavailability** — variants that fail to fetch repeatedly
+- **Variant target duration inconsistency** — all variants must share the same `EXT-X-TARGETDURATION` (§6.2.4)
+- **Variant playlist type inconsistency** — all variants must share the same `EXT-X-PLAYLIST-TYPE` (§6.2.4)
+- **Variant discontinuity inconsistency** — variants at the same media sequence must have matching discontinuity sequence (§6.2.4)
+- **Rendition group violation** — duplicate `NAME` or multiple `DEFAULT=YES` in the same `EXT-X-MEDIA` group (§4.4.6.1)
 
 **Operational**
-- **Stale manifests** — playlists that stop updating beyond a configurable threshold
+- **Stale manifests** — playlists that stop updating beyond a configurable threshold (optional spec-compliant 1.5× target duration mode)
 - **SCTE-35 / CUE marker issues** — orphaned CUE-IN/CUE-OUT tags, missing continuations (opt-in)
+
+**Authoring spec (opt-in)**
+- **Missing AVERAGE-BANDWIDTH** — variant streams should declare `AVERAGE-BANDWIDTH` attribute
+- **Missing INDEPENDENT-SEGMENTS** — master playlist should include `EXT-X-INDEPENDENT-SEGMENTS`
+- **No cellular variant** — at least one variant should have BANDWIDTH ≤ 192 kb/s
+- **Invalid Content-Type** — playlists should use `application/vnd.apple.mpegurl` MIME type
 
 ## Install
 
@@ -98,6 +113,8 @@ All check thresholds are configurable via CLI flags, TOML config, or the API:
 | `--variant-failure-threshold` | Consecutive failures before reporting unavailable | `3` |
 | `--segment-duration-anomaly-ratio` | Min ratio of segment duration to target duration | `0.5` |
 | `--max-concurrent-fetches` | Max concurrent variant playlist fetches | `4` |
+| `--spec-stale` | Use spec-compliant stale timing (1.5× target duration) | `false` |
+| `--authoring-spec` | Enable Apple HLS Authoring Specification checks | `false` |
 
 ## Configuration
 
@@ -120,6 +137,8 @@ See [`config.example.toml`](config.example.toml) for all available options. Copy
 # variant_failure_threshold = 3
 # segment_duration_anomaly_ratio = 0.5
 # max_concurrent_fetches = 4
+# spec_stale = false                 # use 1.5× target duration as stale limit
+# authoring_spec = false                # enable Apple HLS Authoring Spec checks
 
 [[webhook]]
 url = "https://hooks.example.com/hls-alerts"
@@ -170,7 +189,8 @@ curl -X POST http://localhost:8080/api/v1/monitors \
     "streams": ["https://example.com/master.m3u8"],
     "stale_limit": 8000,
     "scte35": true,
-    "max_concurrent_fetches": 4
+    "max_concurrent_fetches": 4,
+    "authoring_spec": true
   }'
 ```
 

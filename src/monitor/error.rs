@@ -26,6 +26,16 @@ pub enum ErrorType {
     SegmentDurationAnomaly,
     VersionViolation,
     DateRangeViolation,
+    TargetDurationChange,
+    MinPlaylistDuration,
+    EndlistViolation,
+    VariantTargetDurationInconsistency,
+    VariantPlaylistTypeInconsistency,
+    VariantDiscontinuityInconsistency,
+    VersionCompatibility,
+    EncryptionViolation,
+    RenditionGroupViolation,
+    AuthoringSpecViolation,
 }
 
 impl fmt::Display for ErrorType {
@@ -49,6 +59,16 @@ impl fmt::Display for ErrorType {
             Self::SegmentDurationAnomaly => write!(f, "Segment Duration Anomaly"),
             Self::VersionViolation => write!(f, "Version Violation"),
             Self::DateRangeViolation => write!(f, "Date Range Violation"),
+            Self::TargetDurationChange => write!(f, "Target Duration Change"),
+            Self::MinPlaylistDuration => write!(f, "Min Playlist Duration"),
+            Self::EndlistViolation => write!(f, "Endlist Violation"),
+            Self::VariantTargetDurationInconsistency => write!(f, "Variant Target Duration Inconsistency"),
+            Self::VariantPlaylistTypeInconsistency => write!(f, "Variant Playlist Type Inconsistency"),
+            Self::VariantDiscontinuityInconsistency => write!(f, "Variant Discontinuity Inconsistency"),
+            Self::VersionCompatibility => write!(f, "Version Compatibility"),
+            Self::EncryptionViolation => write!(f, "Encryption Violation"),
+            Self::RenditionGroupViolation => write!(f, "Rendition Group Violation"),
+            Self::AuthoringSpecViolation => write!(f, "Authoring Spec Violation"),
         }
     }
 }

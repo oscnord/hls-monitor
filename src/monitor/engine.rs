@@ -419,6 +419,7 @@ fn segment_to_snapshot(seg: &m3u8_rs::MediaSegment) -> SegmentSnapshot {
         end_date: dr.end_date,
         duration: dr.duration,
         end_on_next: dr.end_on_next,
+        planned_duration: dr.planned_duration,
     });
 
     SegmentSnapshot {
@@ -449,6 +450,26 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
     let has_cue_out = cue_out_count > 0;
     let has_gaps = segments.iter().any(|s| s.gap);
 
+    let mut keys = Vec::new();
+    let mut seen_keys = std::collections::HashSet::new();
+    for seg in &pl.segments {
+        if let Some(ref key) = seg.key {
+            let method = key.method.to_string();
+            let has_uri = key.uri.is_some();
+            let has_iv = key.iv.is_some();
+            let has_keyformat = key.keyformat.is_some();
+            let sig = format!("{}:{}:{}:{}", method, has_uri, has_iv, has_keyformat);
+            if seen_keys.insert(sig) {
+                keys.push(KeySnapshot {
+                    method: method.clone(),
+                    has_uri,
+                    has_iv,
+                    has_keyformat,
+                });
+            }
+        }
+    }
+
     PlaylistSnapshot {
         media_sequence: pl.media_sequence,
         discontinuity_sequence: pl.discontinuity_sequence,
@@ -462,6 +483,13 @@ fn playlist_to_snapshot(pl: &m3u8_rs::MediaPlaylist) -> PlaylistSnapshot {
         version: pl.version.and_then(|v| u16::try_from(v).ok()),
         playlist_type: pl.playlist_type.as_ref().map(|pt| pt.to_string()),
         has_gaps,
+        has_endlist: pl.end_list,
+        i_frames_only: pl.i_frames_only,
+        has_byte_range: pl.segments.iter().any(|s| s.byte_range.is_some()),
+        has_map: pl.segments.iter().any(|s| s.map.is_some()),
+        has_key_iv: pl.segments.iter().any(|s| s.key.as_ref().is_some_and(|k| k.iv.is_some())),
+        has_key_format: pl.segments.iter().any(|s| s.key.as_ref().is_some_and(|k| k.keyformat.is_some())),
+        keys,
     }
 }
 
@@ -479,6 +507,112 @@ fn media_key(media: &m3u8_rs::AlternativeMedia) -> String {
     format!("{};{}", group, lang)
 }
 
+fn is_valid_hls_content_type(ct: &str) -> bool {
+    let ct_lower = ct.to_lowercase();
+    ct_lower.starts_with("application/vnd.apple.mpegurl")
+        || ct_lower.starts_with("audio/mpegurl")
+        || ct_lower.starts_with("application/x-mpegurl")
+}
+
+fn validate_master(
+    master: &m3u8_rs::MasterPlaylist,
+    stream_url: &str,
+    stream_id: &str,
+    config: &MonitorConfig,
+) -> Vec<MonitorError> {
+    let mut errors = Vec::new();
+
+    let mut groups: HashMap<(String, String), Vec<&m3u8_rs::AlternativeMedia>> = HashMap::new();
+    for media in &master.alternatives {
+        let key = (media.media_type.to_string(), media.group_id.clone());
+        groups.entry(key).or_default().push(media);
+    }
+
+    for ((media_type, group_id), members) in &groups {
+        let mut names = std::collections::HashSet::new();
+        let mut default_count = 0u32;
+
+        for member in members {
+            if !names.insert(&member.name) {
+                errors.push(MonitorError::new(
+                    ErrorType::RenditionGroupViolation,
+                    media_type.as_str(),
+                    group_id.as_str(),
+                    format!(
+                        "Rendition group '{}' has duplicate NAME '{}'",
+                        group_id, member.name
+                    ),
+                    stream_url,
+                    stream_id,
+                ));
+            }
+            if member.default {
+                default_count += 1;
+            }
+        }
+
+        if default_count > 1 {
+            errors.push(MonitorError::new(
+                ErrorType::RenditionGroupViolation,
+                media_type.as_str(),
+                group_id.as_str(),
+                format!(
+                    "Rendition group '{}' has {} members with DEFAULT=YES (max 1 allowed)",
+                    group_id, default_count
+                ),
+                stream_url,
+                stream_id,
+            ));
+        }
+    }
+
+    if config.authoring_spec {
+        let missing_avg_bw = master
+            .variants
+            .iter()
+            .filter(|v| !v.is_i_frame && v.average_bandwidth.is_none())
+            .count();
+        if missing_avg_bw > 0 {
+            errors.push(MonitorError::new(
+                ErrorType::AuthoringSpecViolation,
+                "MASTER",
+                "master",
+                format!("{} variant(s) missing AVERAGE-BANDWIDTH attribute", missing_avg_bw),
+                stream_url,
+                stream_id,
+            ));
+        }
+
+        if !master.independent_segments {
+            errors.push(MonitorError::new(
+                ErrorType::AuthoringSpecViolation,
+                "MASTER",
+                "master",
+                "Master playlist missing EXT-X-INDEPENDENT-SEGMENTS tag",
+                stream_url,
+                stream_id,
+            ));
+        }
+
+        let has_cellular = master
+            .variants
+            .iter()
+            .any(|v| !v.is_i_frame && v.bandwidth <= 192_000);
+        if !has_cellular {
+            errors.push(MonitorError::new(
+                ErrorType::AuthoringSpecViolation,
+                "MASTER",
+                "master",
+                "No variant with BANDWIDTH ≤ 192 kb/s for cellular delivery",
+                stream_url,
+                stream_id,
+            ));
+        }
+    }
+
+    errors
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn poll_stream(
     stream: &StreamItem,
@@ -493,8 +627,8 @@ async fn poll_stream(
     let base_url = get_base_url(&stream.url);
     let mut all_errors = Vec::new();
 
-    let master_body = match loader.load(&stream.url).await {
-        Ok(body) => body,
+    let master_resp = match loader.load(&stream.url).await {
+        Ok(resp) => resp,
         Err(e) => {
             if e.is_last_retry() {
                 let error = MonitorError::new(
@@ -519,7 +653,7 @@ async fn poll_stream(
         }
     };
 
-    let master = match m3u8_rs::parse_playlist(master_body.as_bytes()) {
+    let master = match m3u8_rs::parse_playlist(master_resp.body.as_bytes()) {
         Ok((_, Playlist::MasterPlaylist(pl))) => pl,
         Ok((_, Playlist::MediaPlaylist(_))) => {
             debug!(stream_url = %stream.url, "URL points to media playlist, not master");
@@ -542,6 +676,39 @@ async fn poll_stream(
             return all_errors;
         }
     };
+
+    if config.authoring_spec {
+        if let Some(ref ct) = master_resp.content_type {
+            if !is_valid_hls_content_type(ct) {
+                let error = MonitorError::new(
+                    ErrorType::AuthoringSpecViolation,
+                    "MASTER",
+                    "master",
+                    format!("Master playlist served with invalid Content-Type: {}", ct),
+                    &stream.url,
+                    &stream.id,
+                );
+                let mut data = stream_data.write().await;
+                let sd = data
+                    .entry(base_url.clone())
+                    .or_insert_with(|| StreamData::new(config.error_limit, config.event_limit));
+                record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+            }
+        }
+    }
+
+    {
+        let master_errors = validate_master(&master, &stream.url, &stream.id, config);
+        if !master_errors.is_empty() {
+            let mut data = stream_data.write().await;
+            let sd = data
+                .entry(base_url.clone())
+                .or_insert_with(|| StreamData::new(config.error_limit, config.event_limit));
+            for e in master_errors {
+                record_error(sd, &mut all_errors, notification_tx, monitor_id, e);
+            }
+        }
+    }
 
     let mut variant_targets: Vec<(String, String, String)> = Vec::new();
 
@@ -575,13 +742,14 @@ async fn poll_stream(
             async move { (i, loader.load(&url).await) }
         })
         .collect();
-    let results: Vec<(usize, Result<String, crate::loader::LoadError>)> =
+    let results: Vec<(usize, Result<crate::loader::LoadResponse, crate::loader::LoadError>)> =
         stream::iter(fetch_futures)
             .buffer_unordered(concurrency)
             .collect()
             .await;
 
     let mut content_changed = false;
+    let mut mime_error_emitted = false;
 
     {
         let mut data = stream_data.write().await;
@@ -598,8 +766,8 @@ async fn poll_stream(
         for (i, result) in results.into_iter() {
             let (variant_url, variant_key_str, media_type) = &variant_targets[i];
 
-            let variant_body = match result {
-                Ok(body) => body,
+            let variant_resp = match result {
+                Ok(resp) => resp,
                 Err(e) => {
                     let error = MonitorError::new(
                         ErrorType::ManifestRetrieval,
@@ -616,7 +784,24 @@ async fn poll_stream(
                 }
             };
 
-            let media_playlist = match m3u8_rs::parse_media_playlist_res(variant_body.as_bytes()) {
+            if config.authoring_spec && !mime_error_emitted {
+                if let Some(ref ct) = variant_resp.content_type {
+                    if !is_valid_hls_content_type(ct) {
+                        mime_error_emitted = true;
+                        let error = MonitorError::new(
+                            ErrorType::AuthoringSpecViolation,
+                            media_type.as_str(),
+                            variant_key_str.as_str(),
+                            format!("Variant playlist served with invalid Content-Type: {}", ct),
+                            base_url.as_str(),
+                            stream.id.as_str(),
+                        );
+                        record_error(sd, &mut all_errors, notification_tx, monitor_id, error);
+                    }
+                }
+            }
+
+            let media_playlist = match m3u8_rs::parse_media_playlist_res(variant_resp.body.as_bytes()) {
                 Ok(pl) => pl,
                 Err(e) => {
                     let error = MonitorError::new(
@@ -694,6 +879,9 @@ async fn poll_stream(
                     in_cue_out: new_in_cue_out,
                     cue_out_duration: snapshot.cue_out_duration,
                     version: snapshot.version,
+                    target_duration: snapshot.target_duration,
+                    playlist_type: snapshot.playlist_type.clone(),
+                    has_endlist: snapshot.has_endlist,
                 };
                 sd.variants.insert(variant_key_str.clone(), new_state);
 
@@ -795,6 +983,9 @@ async fn poll_stream(
                     in_cue_out: has_cue_out && !has_cue_in,
                     cue_out_duration: snapshot.cue_out_duration,
                     version: snapshot.version,
+                    target_duration: snapshot.target_duration,
+                    playlist_type: snapshot.playlist_type.clone(),
+                    has_endlist: snapshot.has_endlist,
                 };
                 sd.variants.insert(variant_key_str.clone(), initial_state);
             }
@@ -816,12 +1007,25 @@ async fn poll_stream(
         }
         sd.last_fetch = Utc::now();
 
+        let effective_stale_limit = if config.spec_stale {
+            let max_td = sd.variants.values()
+                .map(|v| v.target_duration)
+                .fold(0.0_f64, f64::max);
+            if max_td > 0.0 {
+                std::time::Duration::from_millis((max_td * 1500.0) as u64)
+            } else {
+                config.stale_limit
+            }
+        } else {
+            config.stale_limit
+        };
+
         let time_since_change = (Utc::now() - sd.last_content_change)
             .num_milliseconds()
             .max(0) as u128;
         let is_stale = check_stale(
             time_since_change,
-            config.stale_limit,
+            effective_stale_limit,
             &stream.url,
             &stream.id,
         );
@@ -877,5 +1081,131 @@ mod tests {
             build_playlist_url("https://a.com/path/", "level_0.m3u8"),
             "https://a.com/path/level_0.m3u8"
         );
+    }
+
+    fn parse_master(text: &str) -> m3u8_rs::MasterPlaylist {
+        let (_, playlist) = m3u8_rs::parse_playlist(text.as_bytes()).unwrap();
+        match playlist {
+            m3u8_rs::Playlist::MasterPlaylist(m) => m,
+            _ => panic!("expected master playlist"),
+        }
+    }
+
+    fn authoring_errors(errors: &[MonitorError]) -> Vec<&MonitorError> {
+        errors
+            .iter()
+            .filter(|e| e.error_type == ErrorType::AuthoringSpecViolation)
+            .collect()
+    }
+
+    #[test]
+    fn test_authoring_avg_bandwidth_missing() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=500000\n\
+            low.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000\n\
+            high.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(ae.iter().any(|e| e.details.contains("AVERAGE-BANDWIDTH")));
+    }
+
+    #[test]
+    fn test_authoring_avg_bandwidth_present() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=500000,AVERAGE-BANDWIDTH=400000\n\
+            low.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000,AVERAGE-BANDWIDTH=800000\n\
+            high.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(!ae.iter().any(|e| e.details.contains("AVERAGE-BANDWIDTH")));
+    }
+
+    #[test]
+    fn test_authoring_independent_segments_missing() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=150000\n\
+            low.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(ae.iter().any(|e| e.details.contains("INDEPENDENT-SEGMENTS")));
+    }
+
+    #[test]
+    fn test_authoring_independent_segments_present() {
+        let text = "#EXTM3U\n\
+            #EXT-X-INDEPENDENT-SEGMENTS\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=150000\n\
+            low.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(!ae.iter().any(|e| e.details.contains("INDEPENDENT-SEGMENTS")));
+    }
+
+    #[test]
+    fn test_authoring_no_cellular_variant() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=500000\n\
+            mid.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000\n\
+            high.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(ae.iter().any(|e| e.details.contains("192 kb/s")));
+    }
+
+    #[test]
+    fn test_authoring_has_cellular_variant() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=150000\n\
+            cellular.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000\n\
+            high.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default().with_authoring_spec(true);
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(!ae.iter().any(|e| e.details.contains("192 kb/s")));
+    }
+
+    #[test]
+    fn test_authoring_disabled_no_errors() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=500000\n\
+            low.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000\n\
+            high.m3u8\n";
+        let master = parse_master(text);
+        let config = MonitorConfig::default();
+        let errors = validate_master(&master, "http://x.com/m.m3u8", "s1", &config);
+        let ae = authoring_errors(&errors);
+        assert!(ae.is_empty());
+    }
+
+    #[test]
+    fn test_valid_hls_content_types() {
+        assert!(is_valid_hls_content_type("application/vnd.apple.mpegurl"));
+        assert!(is_valid_hls_content_type("Application/vnd.apple.mpegURL"));
+        assert!(is_valid_hls_content_type("audio/mpegurl"));
+        assert!(is_valid_hls_content_type("application/x-mpegurl"));
+        assert!(is_valid_hls_content_type("application/vnd.apple.mpegurl; charset=utf-8"));
+    }
+
+    #[test]
+    fn test_invalid_hls_content_types() {
+        assert!(!is_valid_hls_content_type("text/plain"));
+        assert!(!is_valid_hls_content_type("application/octet-stream"));
+        assert!(!is_valid_hls_content_type("video/mp4"));
     }
 }

@@ -81,6 +81,7 @@ impl Notification {
                 EventKind::DiscontinuityChanged => "discontinuity_changed",
                 EventKind::ManifestUpdated => "manifest_updated",
                 EventKind::StaleRecovered => "stale_recovered",
+                EventKind::StreamEnded => "stream_ended",
             },
         }
     }

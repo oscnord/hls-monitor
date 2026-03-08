@@ -52,6 +52,9 @@ pub struct VariantState {
     pub in_cue_out: bool,
     pub cue_out_duration: Option<f64>,
     pub version: Option<u16>,
+    pub target_duration: f64,
+    pub playlist_type: Option<String>,
+    pub has_endlist: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,13 @@ pub struct PlaylistSnapshot {
     pub playlist_type: Option<String>,
     pub version: Option<u16>,
     pub has_gaps: bool,
+    pub has_endlist: bool,
+    pub i_frames_only: bool,
+    pub has_byte_range: bool,
+    pub has_map: bool,
+    pub has_key_iv: bool,
+    pub has_key_format: bool,
+    pub keys: Vec<KeySnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +100,14 @@ pub struct SegmentSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub struct KeySnapshot {
+    pub method: String,
+    pub has_uri: bool,
+    pub has_iv: bool,
+    pub has_keyformat: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct DateRangeSnapshot {
     pub id: String,
     pub class: Option<String>,
@@ -97,6 +115,7 @@ pub struct DateRangeSnapshot {
     pub end_date: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub duration: Option<f64>,
     pub end_on_next: bool,
+    pub planned_duration: Option<f64>,
 }
 
 #[derive(Debug, Clone)]

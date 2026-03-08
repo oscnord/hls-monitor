@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hls_monitor::{ErrorType, EventKind, LoadError, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
+use hls_monitor::{ErrorType, EventKind, LoadError, LoadResponse, ManifestLoader, Monitor, MonitorConfig, MonitorEvent, StreamItem};
 
 const MASTER_URL: &str = "https://mock.mock.com/channels/1xx/master.m3u8";
 const LEVEL0_URL: &str = "https://mock.mock.com/channels/1xx/level_0.m3u8";
@@ -108,14 +108,18 @@ struct SequenceLoader {
 
 #[async_trait]
 impl ManifestLoader for SequenceLoader {
-    async fn load(&self, uri: &str) -> Result<String, LoadError> {
+    async fn load(&self, uri: &str) -> Result<LoadResponse, LoadError> {
         let responses = self
             .responses
             .get(uri)
             .unwrap_or_else(|| panic!("SequenceLoader: unexpected URL: {}", uri));
         let step = self.step.load(Ordering::SeqCst);
         let idx = step.min(responses.len() - 1);
-        Ok(responses[idx].clone())
+        Ok(LoadResponse {
+            body: responses[idx].clone(),
+            content_type: None,
+            content_encoding: None,
+        })
     }
 }
 
@@ -593,14 +597,14 @@ fn count_events(events: &[MonitorEvent], kind: EventKind) -> usize {
 #[tokio::test]
 async fn test_events_manifest_updated() {
     let level0 = vec![
-        mp(0, None, &[s("a0.ts"), s("a1.ts")]),
-        mp(1, None, &[s("a1.ts"), s("a2.ts")]),
-        mp(2, None, &[s("a2.ts"), s("a3.ts")]),
+        mp(0, None, &[s("a0.ts"), s("a1.ts"), s("a2.ts")]),
+        mp(1, None, &[s("a1.ts"), s("a2.ts"), s("a3.ts")]),
+        mp(2, None, &[s("a2.ts"), s("a3.ts"), s("a4.ts")]),
     ];
     let level1 = vec![
-        mp(0, None, &[s("b0.ts"), s("b1.ts")]),
-        mp(1, None, &[s("b1.ts"), s("b2.ts")]),
-        mp(2, None, &[s("b2.ts"), s("b3.ts")]),
+        mp(0, None, &[s("b0.ts"), s("b1.ts"), s("b2.ts")]),
+        mp(1, None, &[s("b1.ts"), s("b2.ts"), s("b3.ts")]),
+        mp(2, None, &[s("b2.ts"), s("b3.ts"), s("b4.ts")]),
     ];
 
     let (errors, events) = run_sequence_with_events(level0, level1, 3).await;

@@ -3,39 +3,38 @@ use crate::monitor::state::{CheckContext, PlaylistSnapshot, VariantState};
 
 use super::Check;
 
-pub struct GapCheck;
+pub struct TargetDurationChangeCheck;
 
-impl Check for GapCheck {
+impl Check for TargetDurationChangeCheck {
     fn name(&self) -> &'static str {
-        "Gap"
+        "TargetDurationChange"
     }
 
     fn check(
         &self,
-        _prev: &VariantState,
+        prev: &VariantState,
         curr: &PlaylistSnapshot,
         ctx: &CheckContext,
     ) -> Vec<MonitorError> {
-        let mut errors = Vec::new();
-
-        for (i, seg) in curr.segments.iter().enumerate() {
-            if seg.gap {
-                let mseq = curr.media_sequence + i as u64;
-                errors.push(MonitorError::new(
-                    ErrorType::GapDetected,
-                    &ctx.media_type,
-                    &ctx.variant_key,
-                    format!(
-                        "EXT-X-GAP at index({}) in mseq({}) \u{2014} segment: '{}'",
-                        i, mseq, seg.uri
-                    ),
-                    &ctx.stream_url,
-                    &ctx.stream_id,
-                ));
-            }
+        if prev.media_sequence == 0 {
+            return vec![];
         }
 
-        errors
+        if (prev.target_duration - curr.target_duration).abs() > f64::EPSILON {
+            return vec![MonitorError::new(
+                ErrorType::TargetDurationChange,
+                &ctx.media_type,
+                &ctx.variant_key,
+                format!(
+                    "EXT-X-TARGETDURATION changed from {}s to {}s",
+                    prev.target_duration, curr.target_duration
+                ),
+                &ctx.stream_url,
+                &ctx.stream_id,
+            )];
+        }
+
+        vec![]
     }
 }
 
@@ -56,7 +55,7 @@ mod tests {
     fn make_prev() -> VariantState {
         VariantState {
             media_type: "VIDEO".to_string(),
-            media_sequence: 0,
+            media_sequence: 100,
             segment_uris: vec!["a.ts".into()],
             discontinuity_sequence: 0,
             next_is_discontinuity: false,
@@ -73,21 +72,21 @@ mod tests {
         }
     }
 
-    fn make_segment(uri: &str, gap: bool) -> SegmentSnapshot {
+    fn make_segment(uri: &str, duration: f64) -> SegmentSnapshot {
         SegmentSnapshot {
             uri: uri.into(),
-            duration: 10.0,
+            duration,
             discontinuity: false,
             cue_out: false,
             cue_in: false,
             cue_out_cont: None,
-            gap,
+            gap: false,
             program_date_time: None,
             daterange: None,
         }
     }
 
-    fn make_snap(segments: Vec<SegmentSnapshot>) -> PlaylistSnapshot {
+    fn make_snap(target_duration: f64, segments: Vec<SegmentSnapshot>) -> PlaylistSnapshot {
         let duration: f64 = segments.iter().map(|s| s.duration).sum();
         PlaylistSnapshot {
             media_sequence: 100,
@@ -98,7 +97,7 @@ mod tests {
             cue_in_count: 0,
             has_cue_out: false,
             cue_out_duration: None,
-            target_duration: 10.0,
+            target_duration,
             playlist_type: None,
             version: None,
             has_gaps: false,
@@ -113,42 +112,34 @@ mod tests {
     }
 
     #[test]
-    fn no_error_without_gaps() {
-        let check = GapCheck;
-        let snap = make_snap(vec![
-            make_segment("a.ts", false),
-            make_segment("b.ts", false),
-        ]);
-        let errors = check.check(&make_prev(), &snap, &ctx());
+    fn no_error_same_target_duration() {
+        let check = TargetDurationChangeCheck;
+        let prev = make_prev();
+        let snap = make_snap(10.0, vec![make_segment("a.ts", 10.0)]);
+        let errors = check.check(&prev, &snap, &ctx());
         assert!(errors.is_empty());
     }
 
     #[test]
-    fn detects_single_gap() {
-        let check = GapCheck;
-        let snap = make_snap(vec![
-            make_segment("a.ts", false),
-            make_segment("b.ts", true),
-        ]);
-        let errors = check.check(&make_prev(), &snap, &ctx());
+    fn error_target_duration_changed() {
+        let check = TargetDurationChangeCheck;
+        let prev = make_prev();
+        let snap = make_snap(6.0, vec![make_segment("a.ts", 6.0)]);
+        let errors = check.check(&prev, &snap, &ctx());
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].error_type, ErrorType::GapDetected);
-        assert!(errors[0].details.contains("index(1)"));
-        assert!(errors[0].details.contains("mseq(101)"));
-        assert!(errors[0].details.contains("b.ts"));
+        assert_eq!(errors[0].error_type, ErrorType::TargetDurationChange);
+        assert!(errors[0].details.contains("10"));
+        assert!(errors[0].details.contains("6"));
     }
 
     #[test]
-    fn detects_multiple_gaps() {
-        let check = GapCheck;
-        let snap = make_snap(vec![
-            make_segment("a.ts", true),
-            make_segment("b.ts", false),
-            make_segment("c.ts", true),
-        ]);
-        let errors = check.check(&make_prev(), &snap, &ctx());
-        assert_eq!(errors.len(), 2);
-        assert!(errors[0].details.contains("a.ts"));
-        assert!(errors[1].details.contains("c.ts"));
+    fn no_error_first_poll() {
+        let check = TargetDurationChangeCheck;
+        let mut prev = make_prev();
+        prev.media_sequence = 0;
+        prev.target_duration = 10.0;
+        let snap = make_snap(6.0, vec![make_segment("a.ts", 6.0)]);
+        let errors = check.check(&prev, &snap, &ctx());
+        assert!(errors.is_empty());
     }
 }
